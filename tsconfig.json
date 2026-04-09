@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    // noEmit: tsup handles the build; tsc is used for type-checking only
+    "noEmit": true
+  },
+  "include": ["src/**/*"]
+}

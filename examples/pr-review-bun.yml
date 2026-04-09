@@ -1,0 +1,54 @@
+# TEMPLATE — copy to .github/workflows/pr-review.yml in your repo.
+#
+# Uses Bun as the runtime — faster CI startup (~1s install), no build step needed.
+# claude-token-proxy runs directly from TypeScript source via Bun.
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   CLAUDE_PROXY_PRIVATE_KEY  — contents of your private.pem
+#   CLAUDE_PROXY_URL          — public URL of your machine, e.g. http://1.2.3.4:7432
+
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    name: Claude PR Review
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup claude-token-proxy
+        run: |
+          git clone https://github.com/dell-4xz8ls3/claude-token-proxy.git /tmp/claude-token-proxy
+          cd /tmp/claude-token-proxy && bun install
+
+      - name: Install Claude CLI
+        run: bun install -g @anthropic-ai/claude-code
+
+      - name: Install pr-audit
+        run: |
+          git clone https://github.com/dell-4xz8ls3/pr-audit.git /tmp/pr-audit
+          cd /tmp/pr-audit && bun install
+          bun install -g /tmp/pr-audit
+
+      - name: Run PR Review
+        env:
+          CLAUDE_PROXY_PRIVATE_KEY: ${{ secrets.CLAUDE_PROXY_PRIVATE_KEY }}
+          PROXY_URL: ${{ secrets.CLAUDE_PROXY_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr-audit "${{ github.event.pull_request.html_url }}" \
+            --auth-token "bun /tmp/claude-token-proxy/src/index.ts decrypt-token"

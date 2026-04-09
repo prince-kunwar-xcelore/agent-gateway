@@ -1,0 +1,19 @@
+node_modules/
+dist/
+
+# RSA private key — NEVER commit this
+private.pem
+
+# public key - create your own
+public.pem
+
+# Token cache
+~/.claude-proxy/
+
+# Environment files
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db

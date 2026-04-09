@@ -1,0 +1,32 @@
+{
+  "name": "claude-token-proxy",
+  "version": "1.0.0",
+  "description": "Proxy daemon that serves Claude.ai session token encrypted for GitHub Actions",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "claude-token-proxy": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev:node": "tsx src/index.ts",
+    "dev:bun": "bun src/index.ts",
+    "start:node": "node dist/index.js",
+    "start:bun": "bun src/index.ts"
+  },
+  "dependencies": {
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "keytar",
+      "esbuild"
+    ]
+  }
+}
