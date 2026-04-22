@@ -22,30 +22,40 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout
+      - name: Checkout PR repo
         uses: actions/checkout@v4
+
+      - name: Checkout claude-token-proxy
+        uses: actions/checkout@v4
+        with:
+          repository: prince-kunwar-xcelore/claude-token-proxy
+          path: _claude-token-proxy
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Setup claude-token-proxy
+      - name: Install and build claude-token-proxy
         run: |
-          git clone https://github.com/dell-4xz8ls3/claude-token-proxy.git /tmp/claude-token-proxy
-          cd /tmp/claude-token-proxy
+          cd _claude-token-proxy
           npm install -g pnpm
           pnpm install
           pnpm build
 
+      - name: Checkout claude-audit-tool
+        uses: actions/checkout@v4
+        with:
+          repository: prince-kunwar-xcelore/claude-audit-tool
+          path: _claude-audit-tool
+
+      - name: Install and build claude-audit-tool
+        run: |
+          cd _claude-audit-tool && npm install && npm run build
+          npm install -g _claude-audit-tool
+
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
-
-      - name: Install pr-audit
-        run: |
-          git clone https://github.com/dell-4xz8ls3/pr-audit.git /tmp/pr-audit
-          cd /tmp/pr-audit && npm install && npm run build
-          npm install -g /tmp/pr-audit
 
       - name: Run PR Review
         env:
@@ -53,5 +63,5 @@ jobs:
           PROXY_URL: ${{ secrets.CLAUDE_PROXY_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pr-audit "${{ github.event.pull_request.html_url }}" \
-            --auth-token "node /tmp/claude-token-proxy/dist/index.js decrypt-token"
+          claude-audit-tool "${{ github.event.pull_request.html_url }}" \
+            --auth-token "node ${{ github.workspace }}/_claude-token-proxy/dist/index.js decrypt-token"

@@ -2,7 +2,7 @@
 
 A lightweight daemon that runs on your local machine and securely serves your Claude.ai OAuth token to GitHub Actions — without ever exposing the raw token.
 
-Built as a companion to [pr-audit](https://github.com/dell-4xz8ls3/pr-audit), which runs Claude-powered PR reviews in CI.
+Built as a companion to [claude-audit-tool](https://github.com/prince-kunwar-xcelore/claude-audit-tool), which runs Claude-powered PR reviews in CI.
 
 ---
 
@@ -11,7 +11,7 @@ Built as a companion to [pr-audit](https://github.com/dell-4xz8ls3/pr-audit), wh
 ```
 YOUR LOCAL MACHINE                      GITHUB ACTIONS RUNNER
 ──────────────────────────────          ──────────────────────────────────────
-claude-token-proxy serve                pr-audit --auth-token "..."
+claude-token-proxy serve                claude-audit-tool --auth-token "..."
   reads ~/.claude/.credentials.json       clones + builds claude-token-proxy
   encrypts token with your public key     runs: claude-token-proxy decrypt-token
   serves GET /token over internet           fetches encrypted token via PROXY_URL
@@ -38,7 +38,7 @@ The token is encrypted with **RSA-OAEP + AES-256-GCM** hybrid encryption before 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/dell-4xz8ls3/claude-token-proxy.git
+git clone https://github.com/prince-kunwar-xcelore/claude-token-proxy.git
 cd claude-token-proxy
 bun install          # or: pnpm install
 ```
@@ -110,7 +110,7 @@ Pick one of the two workflow templates from `examples/` and copy it to `.github/
 | `examples/pr-review-bun.yml` | Bun | ~1s | None — runs from source |
 | `examples/pr-review-node.yml` | Node 20 | ~30s | `pnpm build` (tsup) |
 
-The `decrypt-token` subcommand is designed to be passed directly as the `--auth-token` helper to `pr-audit`:
+The `decrypt-token` subcommand is designed to be passed directly as the `--auth-token` helper to `claude-audit-tool`:
 
 ```yaml
 - name: Run PR Review
@@ -119,7 +119,7 @@ The `decrypt-token` subcommand is designed to be passed directly as the `--auth-
     PROXY_URL: ${{ secrets.CLAUDE_PROXY_URL }}
     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   run: |
-    pr-audit "${{ github.event.pull_request.html_url }}" \
+    claude-audit-tool "${{ github.event.pull_request.html_url }}" \
       --auth-token "bun /tmp/claude-token-proxy/src/index.ts decrypt-token"
 ```
 
