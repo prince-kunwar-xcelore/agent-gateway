@@ -45,10 +45,8 @@ jobs:
           repository: prince-kunwar-xcelore/claude-audit-tool
           path: _claude-audit-tool
 
-      - name: Install and build claude-audit-tool
-        run: |
-          cd _claude-audit-tool && bun install
-          bun install -g _claude-audit-tool
+      - name: Install claude-audit-tool deps
+        run: cd _claude-audit-tool && bun install
 
       - name: Install Claude CLI
         run: bun install -g @anthropic-ai/claude-code
@@ -59,5 +57,5 @@ jobs:
           PROXY_URL: ${{ secrets.CLAUDE_PROXY_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          claude-audit-tool "${{ github.event.pull_request.html_url }}" \
+          bun ${{ github.workspace }}/_claude-audit-tool/src/index.ts "${{ github.event.pull_request.html_url }}" \
             --auth-token "bun ${{ github.workspace }}/_claude-token-proxy/src/index.ts decrypt-token"
