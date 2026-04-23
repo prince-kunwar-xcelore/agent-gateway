@@ -28,5 +28,10 @@ export async function runDecryptToken(args: string[]): Promise<void> {
 
   const encryptedToken = await fetchEncryptedToken(proxyUrl);
   const token = decryptToken(encryptedToken, privateKeyPem!);
+
+  // Debug info on stderr so it doesn't pollute stdout (used by $() substitution)
+  process.stderr.write(`[token-proxy] Decrypted token length: ${token.length}\n`);
+  process.stderr.write(`[token-proxy] Token preview: ${token.slice(0, 30)}…\n`);
+
   process.stdout.write(token);
 }
