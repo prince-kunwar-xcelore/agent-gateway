@@ -1,0 +1,44 @@
+# TEMPLATE — copy to .gitlab-ci.yml in your repo.
+#
+# Uses Bun as the runtime — faster CI startup (~1s install), no build step needed.
+# claude-token-proxy and claude-audit-tool run directly from TypeScript source via Bun.
+#
+# Required GitLab CI/CD Variables (Settings → CI/CD → Variables):
+#   CLAUDE_PROXY_PRIVATE_KEY  — contents of your private.pem (mask + protect)
+#   CLAUDE_PROXY_URL          — public URL of your machine, e.g. http://1.2.3.4:7432
+#   GITLAB_TOKEN              — personal/project access token with `api` scope
+#                                CI_JOB_TOKEN is NOT sufficient — it cannot post
+#                                discussions or call /approve.
+
+stages:
+  - review
+
+mr-review:
+  stage: review
+  image: oven/bun:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  variables:
+    GLAB_VERSION: "1.65.0"
+    GITLAB_HOST: $CI_SERVER_HOST
+  before_script:
+    # Install glab CLI (and git, not in the bun image by default)
+    - apt-get update -qq && apt-get install -yqq curl tar git
+    - curl -fsSL -o /tmp/glab.tar.gz "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_Linux_x86_64.tar.gz"
+    - tar -xzf /tmp/glab.tar.gz -C /tmp
+    - install -m 755 /tmp/bin/glab /usr/local/bin/glab
+
+    # Clone and install claude-token-proxy
+    - git clone --depth 1 https://github.com/prince-kunwar-xcelore/claude-token-proxy.git _claude-token-proxy
+    - cd _claude-token-proxy && bun install && cd -
+
+    # Clone and install claude-audit-tool — invoked directly from source via Bun
+    - git clone --depth 1 https://github.com/prince-kunwar-xcelore/claude-audit-tool.git _claude-audit-tool
+    - cd _claude-audit-tool && bun install && cd -
+
+    # Install Claude CLI
+    - bun install -g @anthropic-ai/claude-code
+  script:
+    - bun ${CI_PROJECT_DIR}/_claude-audit-tool/src/index.ts
+        "${CI_MERGE_REQUEST_PROJECT_URL}/-/merge_requests/${CI_MERGE_REQUEST_IID}"
+        --auth-token "bun ${CI_PROJECT_DIR}/_claude-token-proxy/src/index.ts decrypt-token"
