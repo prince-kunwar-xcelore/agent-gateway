@@ -1,7 +1,7 @@
 # TEMPLATE — copy to .github/workflows/pr-review.yml in your repo.
 #
 # Uses Node.js as the runtime — standard, universal.
-# claude-token-proxy is built with tsup before running.
+# Both claude-token-proxy and claude-audit-tool run directly from TypeScript source via tsx.
 #
 # Required GitHub Secrets (Settings → Secrets → Actions):
 #   CLAUDE_PROXY_PRIVATE_KEY  — contents of your private.pem
@@ -36,12 +36,8 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install and build claude-token-proxy
-        run: |
-          cd _claude-token-proxy
-          npm install -g pnpm
-          pnpm install
-          pnpm build
+      - name: Install claude-token-proxy deps
+        run: cd _claude-token-proxy && npm install
 
       - name: Checkout claude-audit-tool
         uses: actions/checkout@v4
@@ -49,13 +45,11 @@ jobs:
           repository: prince-kunwar-xcelore/claude-audit-tool
           path: _claude-audit-tool
 
-      - name: Install and build claude-audit-tool
-        run: |
-          cd _claude-audit-tool && npm install && npm run build
-          npm install -g _claude-audit-tool
+      - name: Install claude-audit-tool deps
+        run: cd _claude-audit-tool && npm install
 
-      - name: Install Claude CLI
-        run: npm install -g @anthropic-ai/claude-code
+      - name: Install Claude CLI and tsx
+        run: npm install -g @anthropic-ai/claude-code tsx
 
       - name: Run PR Review
         env:
@@ -63,5 +57,5 @@ jobs:
           PROXY_URL: ${{ secrets.CLAUDE_PROXY_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          claude-audit-tool "${{ github.event.pull_request.html_url }}" \
-            --auth-token "node ${{ github.workspace }}/_claude-token-proxy/dist/index.js decrypt-token"
+          tsx ${{ github.workspace }}/_claude-audit-tool/src/index.ts "${{ github.event.pull_request.html_url }}" \
+            --auth-token "tsx ${{ github.workspace }}/_claude-token-proxy/src/index.ts decrypt-token"
