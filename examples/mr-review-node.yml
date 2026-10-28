@@ -1,7 +1,7 @@
 # TEMPLATE — copy to .gitlab-ci.yml in your repo.
 #
 # Uses Node.js as the runtime — standard, universal.
-# claude-token-proxy is built before running.
+# agent-gateway is built before running.
 #
 # Pick the agent whose subscription reviews the MR with REVIEW_AGENT below.
 #
@@ -45,17 +45,17 @@ mr-review:
     - tar -xzf /tmp/glab.tar.gz -C /tmp
     - install -m 755 /tmp/bin/glab /usr/local/bin/glab
 
-    # Build claude-token-proxy
-    - git clone --depth 1 https://github.com/prince-kunwar-xcelore/claude-token-proxy.git _claude-token-proxy
-    - cd _claude-token-proxy && npm install -g pnpm && pnpm install && pnpm build && cd -
+    # Build agent-gateway
+    - git clone --depth 1 https://github.com/prince-kunwar-xcelore/agent-gateway.git _agent-gateway
+    - cd _agent-gateway && npm install -g pnpm && pnpm install && pnpm build && cd -
 
     # Install pr-audit globally (provides `pr-audit` on PATH)
-    - git clone --depth 1 https://github.com/prince-kunwar-xcelore/claude-audit-tool.git _claude-audit-tool
-    - cd _claude-audit-tool && npm install && npm run build && npm install -g . && cd -
+    - git clone --depth 1 https://github.com/prince-kunwar-xcelore/pr-audit.git _pr-audit
+    - cd _pr-audit && npm install && npm run build && npm install -g . && cd -
 
     # Install the agent CLI
     - if [ "$REVIEW_AGENT" = codex ]; then npm install -g @openai/codex; else npm install -g @anthropic-ai/claude-code; fi
   script:
     - pr-audit "${CI_MERGE_REQUEST_PROJECT_URL}/-/merge_requests/${CI_MERGE_REQUEST_IID}"
         --engine "$REVIEW_AGENT-cli"
-        --auth-token "$(node ${CI_PROJECT_DIR}/_claude-token-proxy/dist/index.js decrypt-token --agent $REVIEW_AGENT)"
+        --auth-token "$(node ${CI_PROJECT_DIR}/_agent-gateway/dist/index.js decrypt-token --agent $REVIEW_AGENT)"

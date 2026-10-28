@@ -2,7 +2,7 @@
 
 A lightweight daemon that runs on your local machine and securely serves your **Claude** or **Codex** subscription credentials to CI (GitHub Actions, GitLab CI) — so PR reviews run on the subscription you already pay for, without ever exposing the raw credentials.
 
-Built as a companion to [claude-audit-tool](https://github.com/prince-kunwar-xcelore/claude-audit-tool), which runs Claude-powered PR reviews in CI.
+Built as a companion to [pr-audit](https://github.com/prince-kunwar-xcelore/pr-audit), which runs Claude- or Codex-powered PR reviews in CI.
 
 ---
 
@@ -11,9 +11,9 @@ Built as a companion to [claude-audit-tool](https://github.com/prince-kunwar-xce
 ```
 YOUR LOCAL MACHINE                      GITHUB ACTIONS RUNNER
 ──────────────────────────────          ──────────────────────────────────────
-claude-token-proxy serve                claude-audit-tool --engine <agent>-cli --auth-token "..."
-  reads ~/.claude/.credentials.json       clones claude-token-proxy
-    and ~/.codex/auth.json                runs: claude-token-proxy decrypt-token --agent <agent>
+agent-gateway service (serve)           pr-audit --engine <agent>-cli --auth-token "..."
+  reads ~/.claude/.credentials.json       clones agent-gateway
+    and ~/.codex/auth.json                runs: agent-gateway decrypt-token --agent <agent>
   serves /token?agent=claude|codex          authenticates (private key or OIDC, see below)
                                             fetches + decrypts credentials
                                             writes them to stdout
@@ -21,7 +21,7 @@ claude-token-proxy serve                claude-audit-tool --engine <agent>-cli -
                                           posts review back to the PR
 ```
 
-Credentials are encrypted with **RSA-OAEP + AES-256-GCM** hybrid encryption before leaving your machine, so the tunnel in between (ngrok etc.) never sees them.
+Credentials are encrypted with **RSA-OAEP + AES-256-GCM** hybrid encryption before leaving your machine, so the tunnel in between (Cloudflare, ngrok, …) never sees them.
 
 ### Two auth modes — enable either or both
 
@@ -51,7 +51,7 @@ The allowlist mode verifies the GitHub Actions / GitLab CI ID token against the 
 ### 1. Clone, install, build
 
 ```bash
-git clone https://github.com/prince-kunwar-xcelore/claude-token-proxy.git agent-gateway
+git clone https://github.com/prince-kunwar-xcelore/agent-gateway.git
 cd agent-gateway
 pnpm install && pnpm build      # the service runs dist/index.js under Node
 alias agent-gateway="node $PWD/dist/index.js"   # or: pnpm link --global
@@ -188,7 +188,7 @@ Pick a template from `examples/` and copy it into your repo. Set `REVIEW_AGENT` 
 | `examples/mr-review-bun.yml` | Bun (GitLab) | ~1s | None |
 | `examples/mr-review-node.yml` | Node 20 (GitLab) | ~30s | `pnpm build` (tsup) |
 
-The `decrypt-token` subcommand is designed to be passed directly as the `--auth-token` helper to `claude-audit-tool`:
+The `decrypt-token` subcommand is designed to be passed directly as the `--auth-token` helper to `pr-audit`:
 
 ```yaml
 permissions:
@@ -200,8 +200,8 @@ permissions:
     AGENT_GATEWAY_URL: ${{ secrets.AGENT_GATEWAY_URL }}
     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   run: |
-    claude-audit-tool "${{ github.event.pull_request.html_url }}" --engine codex-cli \
-      --auth-token "$(bun /tmp/claude-token-proxy/src/index.ts decrypt-token --agent codex)"
+    pr-audit "${{ github.event.pull_request.html_url }}" --engine codex-cli \
+      --auth-token "$(bun /tmp/agent-gateway/src/index.ts decrypt-token --agent codex)"
 ```
 
 ---

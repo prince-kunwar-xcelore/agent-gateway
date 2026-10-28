@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "claude-token-proxy",
+      "name": "agent-gateway",
       "dependencies": {
         "keytar": "^7.9.0",
       },
