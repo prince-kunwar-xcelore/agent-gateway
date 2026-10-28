@@ -183,9 +183,17 @@ function handleHealth(res: http.ServerResponse, opts: ServerOptions): void {
     };
   }
 
+  // An empty allowlist with no key mode rejects every request: not healthy, even if credentials are fresh
+  const warnings: string[] = [];
+  if (opts.oidc && !opts.oidc.allow.length) {
+    warnings.push('allowlist mode is enabled but the allowlist is empty');
+    if (!opts.keyMode) ok = false;
+  }
+
   sendJson(res, 200, {
     ok,
     modes: { private_key: opts.keyMode, allowlist: opts.oidc !== null },
+    ...(warnings.length ? { warnings } : {}),
     agents,
   });
 }

@@ -1,11 +1,11 @@
 {
-  "name": "claude-token-proxy",
+  "name": "agent-gateway",
   "version": "1.0.0",
-  "description": "Proxy daemon that serves Claude.ai session token encrypted for GitHub Actions",
+  "description": "Serves your local Claude / Codex subscription credentials, encrypted, to CI over HTTP",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "claude-token-proxy": "dist/index.js"
+    "agent-gateway": "dist/index.js"
   },
   "scripts": {
     "build": "tsup",

@@ -1,68 +1,51 @@
-import path from 'node:path';
-import { getArg, getArgs } from '../args';
+import { getArgs } from '../args';
 import { loadPem } from '../crypto';
 import { startDaemon } from '../daemon';
 import { startServer } from '../server';
-import { DEFAULT_AUDIENCE } from '../oidc';
 import { parseAllowList, trustedIssuers } from '../allowlist';
-import { AGENTS, type Agent } from '../token-reader';
+import { resolveServeConfig, validateConfig } from '../config';
 
 export function runServe(args: string[]): void {
-  const port = parseInt(getArg(args, '--port', '7432')!, 10);
-
-  const agents = (getArg(args, '--agents', AGENTS.join(','))!).split(',').map((a) => a.trim()) as Agent[];
-  const unknown = agents.filter((a) => !AGENTS.includes(a));
-  if (unknown.length) {
-    console.error(`[startup] Unknown agent(s): ${unknown.join(', ')}. Supported: ${AGENTS.join(', ')}`);
-    process.exit(1);
-  }
-
   if (getArgs(args, '--oidc-issuer').length) {
     console.error('[startup] --oidc-issuer was removed: name the issuer in the allow entry instead,');
     console.error('[startup]   e.g. --allow gitlab@https://git.example.com:group/*  (gitlab.com: --allow gitlab:group/*)');
     process.exit(1);
   }
 
-  let allow;
-  try {
-    allow = parseAllowList(getArgs(args, '--allow'));
-  } catch (err) {
-    console.error(`[startup] ${err instanceof Error ? err.message : String(err)}`);
+  const { config, source } = resolveServeConfig(args);
+
+  const errors = validateConfig(config);
+  if (errors.length) {
+    for (const e of errors) console.error(`[startup] ${e}`);
     process.exit(1);
   }
-
-  // Private-key mode: explicit --public-key, or ./public.pem when no allowlist is given
-  // (preserves the original zero-flag behaviour).
-  const explicitKey = getArg(args, '--public-key');
-  const publicKeyPath = explicitKey ?? (allow.length ? null : 'public.pem');
+  console.log(`[startup] Config: ${source ?? '(none — flags only)'}`);
 
   let publicKeyPem: string | null = null;
-  if (publicKeyPath) {
+  if (config.privateKey.enabled) {
+    const publicKeyPath = config.privateKey.publicKeyPath!;
     try {
-      publicKeyPem = loadPem(path.resolve(publicKeyPath));
+      publicKeyPem = loadPem(publicKeyPath);
     } catch {
-      console.error(`[startup] Failed to load public key from: ${path.resolve(publicKeyPath)}`);
-      console.error('[startup] Run "generate-keys" to create a keypair, or use --allow <owner/repo> for OIDC mode.');
+      console.error(`[startup] Failed to load public key from: ${publicKeyPath}`);
+      console.error('[startup] Run "generate-keys" to create a keypair, or use allowlist mode (--allow <owner/repo>).');
       process.exit(1);
     }
-    console.log(`[startup] Private-key mode: ${path.resolve(publicKeyPath)}`);
+    console.log(`[startup] Private-key mode: ${publicKeyPath}`);
   }
 
-  const oidc = allow.length
-    ? {
-        allow,
-        audience: getArg(args, '--audience', DEFAULT_AUDIENCE)!,
-      }
-    : null;
+  const allow = parseAllowList(config.allowlist.allow);
+  const oidc = config.allowlist.enabled ? { allow, audience: config.allowlist.audience } : null;
   if (oidc) {
-    console.log(`[startup] Allowlist mode: ${allow.map((e) => e.raw).join(', ')} (audience "${oidc.audience}")`);
-    console.log(`[startup]   Trusted issuers: ${trustedIssuers(allow).join(', ')}`);
+    if (!allow.length) console.warn('[startup] Allowlist mode is enabled but the allowlist is empty — every OIDC request will be rejected.');
+    console.log(`[startup] Allowlist mode: ${allow.map((e) => e.raw).join(', ') || '(empty)'} (audience "${oidc.audience}")`);
+    console.log(`[startup]   Trusted issuers: ${trustedIssuers(allow).join(', ') || '(none)'}`);
   }
 
-  console.log(`[startup] Starting on port ${port}...`);
+  console.log(`[startup] Starting on port ${config.port}...`);
 
-  const stopDaemon = startDaemon(agents, publicKeyPem);
-  const stopServer = startServer(port, { agents, keyMode: publicKeyPem !== null, oidc });
+  const stopDaemon = startDaemon(config.agents, publicKeyPem);
+  const stopServer = startServer(config.port, { agents: config.agents, keyMode: publicKeyPem !== null, oidc });
 
   const shutdown = (signal: string): void => {
     console.log(`\n[shutdown] ${signal} received. Shutting down...`);

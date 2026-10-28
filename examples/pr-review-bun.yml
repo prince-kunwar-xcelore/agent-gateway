@@ -1,7 +1,7 @@
 # TEMPLATE — copy to .github/workflows/pr-review.yml in your repo.
 #
 # Uses Bun as the runtime — faster CI startup (~1s install), no build step needed.
-# claude-token-proxy runs directly from TypeScript source via Bun.
+# agent-gateway runs directly from TypeScript source via Bun.
 #
 # Pick the agent whose subscription reviews the PR with REVIEW_AGENT below.
 #
@@ -37,28 +37,28 @@ jobs:
       - name: Checkout PR repo
         uses: actions/checkout@v4
 
-      - name: Checkout claude-token-proxy
+      - name: Checkout agent-gateway
         uses: actions/checkout@v4
         with:
-          repository: prince-kunwar-xcelore/claude-token-proxy
-          path: _claude-token-proxy
+          repository: prince-kunwar-xcelore/agent-gateway
+          path: _agent-gateway
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Install claude-token-proxy deps
-        run: cd _claude-token-proxy && bun install
+      - name: Install agent-gateway deps
+        run: cd _agent-gateway && bun install
 
-      - name: Checkout claude-audit-tool
+      - name: Checkout pr-audit
         uses: actions/checkout@v4
         with:
-          repository: prince-kunwar-xcelore/claude-audit-tool
-          path: _claude-audit-tool
+          repository: prince-kunwar-xcelore/pr-audit
+          path: _pr-audit
 
-      - name: Install claude-audit-tool deps
-        run: cd _claude-audit-tool && bun install
+      - name: Install pr-audit deps
+        run: cd _pr-audit && bun install
 
       - name: Install agent CLI
         run: |
@@ -74,6 +74,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
-          bun ${{ github.workspace }}/_claude-audit-tool/src/index.ts "$PR_URL" \
+          bun ${{ github.workspace }}/_pr-audit/src/index.ts "$PR_URL" \
             --engine "$REVIEW_AGENT-cli" \
-            --auth-token "$(bun ${{ github.workspace }}/_claude-token-proxy/src/index.ts decrypt-token --agent "$REVIEW_AGENT")"
+            --auth-token "$(bun ${{ github.workspace }}/_agent-gateway/src/index.ts decrypt-token --agent "$REVIEW_AGENT")"
