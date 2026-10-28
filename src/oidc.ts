@@ -13,6 +13,8 @@ export const GITLAB_ISSUER = 'https://gitlab.com';
 export const DEFAULT_AUDIENCE = 'agent-gateway';
 
 const JWKS_TTL_MS = 60 * 60 * 1000;
+// Unknown kids force a refetch (key rotation); cap that so forged kids can't make us hammer the issuer
+const JWKS_MIN_REFRESH_MS = 60 * 1000;
 const CLOCK_SKEW_S = 60;
 
 export interface OidcClaims {
@@ -50,7 +52,8 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 async function getJwks(issuer: string, forceRefresh = false): Promise<Jwk[]> {
   const cached = jwksCache.get(issuer);
-  if (cached && !forceRefresh && Date.now() - cached.fetchedAt < JWKS_TTL_MS) return cached.keys;
+  const age = cached ? Date.now() - cached.fetchedAt : Infinity;
+  if (cached && (forceRefresh ? age < JWKS_MIN_REFRESH_MS : age < JWKS_TTL_MS)) return cached.keys;
 
   const config = await fetchJson<{ jwks_uri: string }>(
     `${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`,
@@ -89,7 +92,10 @@ export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<O
 
   // Trust the issuer only after checking it against our list — it selects the JWKS.
   const unverified = b64urlJson<OidcClaims>(payloadB64);
-  const issuer = opts.issuers.find((i) => i.replace(/\/$/, '') === unverified.iss?.replace(/\/$/, ''));
+  if (!unverified || typeof unverified !== 'object' || typeof unverified.iss !== 'string') {
+    throw new Error('JWT payload has no issuer');
+  }
+  const issuer = opts.issuers.find((i) => i.replace(/\/$/, '') === unverified.iss.replace(/\/$/, ''));
   if (!issuer) throw new Error(`Untrusted issuer: ${unverified.iss}`);
 
   let keys = await getJwks(issuer);

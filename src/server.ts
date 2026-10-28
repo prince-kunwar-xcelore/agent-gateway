@@ -16,6 +16,8 @@ export interface ServerOptions {
 
 const MAX_BODY_BYTES = 16 * 1024;
 
+class BodyTooLargeError extends Error {}
+
 /**
  * Create and return the HTTP server (not yet listening).
  * Routes:
@@ -94,7 +96,8 @@ function readBody(req: http.IncomingMessage): Promise<string> {
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) { reject(new Error('Body too large')); req.destroy(); return; }
+      // Stop reading but keep the socket so the 413 can be delivered; it is closed after the response
+      if (size > MAX_BODY_BYTES) { req.pause(); reject(new BodyTooLargeError('Body too large')); return; }
       chunks.push(chunk);
     });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
@@ -144,6 +147,11 @@ async function handleOidcToken(
     }
     publicKeyPem = body.publicKey;
   } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' });
+      res.end(JSON.stringify({ error: `Body exceeds ${MAX_BODY_BYTES} bytes` }), () => req.destroy());
+      return;
+    }
     sendJson(res, 400, { error: `Invalid body: ${err instanceof Error ? err.message : String(err)}` });
     return;
   }
