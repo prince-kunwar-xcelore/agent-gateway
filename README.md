@@ -33,7 +33,7 @@ Credentials are encrypted with **RSA-OAEP + AES-256-GCM** hybrid encryption befo
 | CI setup | `AGENT_GATEWAY_PRIVATE_KEY` secret in every repo | Nothing beyond `AGENT_GATEWAY_URL` (+ `id-token: write` / `id_tokens:`) |
 | Revoke a repo | Rotate the keypair everywhere | Remove it from `--allow` |
 
-The allowlist mode verifies the GitHub Actions / GitLab CI ID token against the issuer's published keys (signature, issuer, audience `agent-gateway`, expiry) and checks its `repository` (GitHub) or `project_path` (GitLab) claim. `decrypt-token` picks private-key mode when a key is provided, OIDC otherwise.
+The allowlist mode verifies the GitHub Actions / GitLab CI ID token against the issuer's published keys (signature, issuer, audience `agent-gateway`, expiry) and checks its `repository` (GitHub) or `project_path` (GitLab) claim. `decrypt-token` tries the allowlist (OIDC) first whenever the CI job can obtain an OIDC token, and falls back to the private key, if one is configured, when OIDC is unavailable or refused.
 
 ---
 

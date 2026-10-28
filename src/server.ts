@@ -121,6 +121,18 @@ async function handleOidcToken(
     return;
   }
 
+  let repo: string | null;
+  try {
+    const claims = await verifyOidcToken(auth.slice('Bearer '.length).trim(), opts.oidc);
+    repo = repoFromClaims(claims);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] OIDC rejected (${agent}): ${reason}`);
+    sendJson(res, 403, { error: 'OIDC verification failed', detail: reason });
+    return;
+  }
+
+  // Parse the submitted key only after the caller is authenticated
   let publicKeyPem: string;
   try {
     const body = JSON.parse(await readBody(req)) as { publicKey?: string };
@@ -133,17 +145,6 @@ async function handleOidcToken(
     publicKeyPem = body.publicKey;
   } catch (err) {
     sendJson(res, 400, { error: `Invalid body: ${err instanceof Error ? err.message : String(err)}` });
-    return;
-  }
-
-  let repo: string | null;
-  try {
-    const claims = await verifyOidcToken(auth.slice('Bearer '.length).trim(), opts.oidc);
-    repo = repoFromClaims(claims);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.warn(`[server] OIDC rejected (${agent}): ${reason}`);
-    sendJson(res, 403, { error: 'OIDC verification failed', detail: reason });
     return;
   }
 

@@ -16,7 +16,7 @@
 #                        The job proves its identity with the AGENT_GATEWAY_OIDC_TOKEN id_token below.
 #   Private key:         variable AGENT_GATEWAY_PRIVATE_KEY — contents of your private.pem
 #                        (mask + protect), proxy started with `serve --public-key public.pem`.
-#                        When set it takes precedence over OIDC.
+#                        Used only as a fallback when the OIDC allowlist request fails.
 
 stages:
   - review

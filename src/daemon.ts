@@ -77,4 +77,5 @@ export const getState = (agent: Agent): AgentState | null => {
   const state = states.get(agent);
   return state ? { ...state } : null;
 };
-export const getStates = (): Map<Agent, AgentState> => new Map(states);
+export const getStates = (): Map<Agent, AgentState> =>
+  new Map([...states].map(([agent, state]) => [agent, { ...state }]));

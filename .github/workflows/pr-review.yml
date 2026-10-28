@@ -13,7 +13,7 @@
 #                        the job proves its identity with GitHub OIDC (id-token: write below).
 #   Private key:         secret AGENT_GATEWAY_PRIVATE_KEY — contents of your private.pem,
 #                        proxy started with `serve --public-key public.pem`.
-#                        When this secret is set it takes precedence over OIDC.
+#                        Used only as a fallback when the OIDC allowlist request fails.
 
 name: PR Review
 
