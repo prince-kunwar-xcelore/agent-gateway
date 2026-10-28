@@ -3,12 +3,20 @@
 # Uses Bun as the runtime — faster CI startup (~1s install), no build step needed.
 # claude-token-proxy and claude-audit-tool run directly from TypeScript source via Bun.
 #
+# Pick the agent whose subscription reviews the MR with REVIEW_AGENT below.
+#
 # Required GitLab CI/CD Variables (Settings → CI/CD → Variables):
-#   CLAUDE_PROXY_PRIVATE_KEY  — contents of your private.pem (mask + protect)
-#   CLAUDE_PROXY_URL          — public URL of your machine, e.g. http://1.2.3.4:7432
+#   CLAUDE_PROXY_URL          — public URL of your proxy, e.g. https://you.ngrok-free.app
 #   GITLAB_TOKEN              — personal/project access token with `api` scope
 #                                CI_JOB_TOKEN is NOT sufficient — it cannot post
 #                                discussions or call /approve.
+# Auth — one of:
+#   Allowlist (no key):  start the proxy with `serve --allow <group>/<project>`
+#                        (add `--oidc-issuer https://<host>` for self-hosted GitLab).
+#                        The job proves its identity with the PROXY_OIDC_TOKEN id_token below.
+#   Private key:         variable CLAUDE_PROXY_PRIVATE_KEY — contents of your private.pem
+#                        (mask + protect), proxy started with `serve --public-key public.pem`.
+#                        When set it takes precedence over OIDC.
 
 stages:
   - review
@@ -18,7 +26,11 @@ mr-review:
   image: oven/bun:latest
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  id_tokens:
+    PROXY_OIDC_TOKEN:
+      aud: agent-token-proxy
   variables:
+    REVIEW_AGENT: claude   # claude | codex
     GLAB_VERSION: "1.65.0"
     GITLAB_HOST: $CI_SERVER_HOST
   before_script:
@@ -36,9 +48,10 @@ mr-review:
     - git clone --depth 1 https://github.com/prince-kunwar-xcelore/claude-audit-tool.git _claude-audit-tool
     - cd _claude-audit-tool && bun install && cd -
 
-    # Install Claude CLI
-    - bun install -g @anthropic-ai/claude-code
+    # Install the agent CLI
+    - if [ "$REVIEW_AGENT" = codex ]; then bun install -g @openai/codex; else bun install -g @anthropic-ai/claude-code; fi
   script:
     - bun ${CI_PROJECT_DIR}/_claude-audit-tool/src/index.ts
         "${CI_MERGE_REQUEST_PROJECT_URL}/-/merge_requests/${CI_MERGE_REQUEST_IID}"
-        --auth-token "bun ${CI_PROJECT_DIR}/_claude-token-proxy/src/index.ts decrypt-token"
+        --engine "$REVIEW_AGENT-cli"
+        --auth-token "$(bun ${CI_PROJECT_DIR}/_claude-token-proxy/src/index.ts decrypt-token --agent $REVIEW_AGENT)"

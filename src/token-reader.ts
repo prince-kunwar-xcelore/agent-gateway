@@ -67,6 +67,38 @@ async function readCredentialsFromKeychain(): Promise<string | null> {
   }
 }
 
+export type Agent = 'claude' | 'codex';
+export const AGENTS: Agent[] = ['claude', 'codex'];
+
+/**
+ * Read the full Codex auth.json from $CODEX_HOME (default ~/.codex).
+ * Contains the ChatGPT subscription tokens (or an OPENAI_API_KEY) that
+ * `codex exec` needs.
+ */
+function readCodexCredentials(): string {
+  const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
+  const authPath = path.join(codexHome, 'auth.json');
+
+  try {
+    const raw = fs.readFileSync(authPath, 'utf8');
+    const parsed = JSON.parse(raw) as {
+      tokens?: { access_token?: string };
+      OPENAI_API_KEY?: string | null;
+    };
+    if (parsed?.tokens?.access_token || parsed?.OPENAI_API_KEY) return raw;
+  } catch { /* fall through */ }
+
+  throw new Error(
+    `Could not read Codex credentials from ${authPath}. ` +
+    'Make sure Codex CLI is installed and you are logged in.'
+  );
+}
+
+/** Read the current credentials JSON string for the given agent. */
+export async function readCredentials(agent: Agent): Promise<string> {
+  return agent === 'codex' ? readCodexCredentials() : readToken();
+}
+
 /**
  * Read the current Claude credentials JSON string.
  * Priority: disk file → system keychain.
