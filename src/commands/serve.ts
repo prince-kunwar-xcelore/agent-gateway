@@ -3,7 +3,8 @@ import { getArg, getArgs } from '../args';
 import { loadPem } from '../crypto';
 import { startDaemon } from '../daemon';
 import { startServer } from '../server';
-import { DEFAULT_AUDIENCE, GITHUB_ISSUER, GITLAB_ISSUER } from '../oidc';
+import { DEFAULT_AUDIENCE } from '../oidc';
+import { parseAllowList, trustedIssuers } from '../allowlist';
 import { AGENTS, type Agent } from '../token-reader';
 
 export function runServe(args: string[]): void {
@@ -16,7 +17,13 @@ export function runServe(args: string[]): void {
     process.exit(1);
   }
 
-  const allow = getArgs(args, '--allow');
+  let allow;
+  try {
+    allow = parseAllowList(getArgs(args, '--allow'));
+  } catch (err) {
+    console.error(`[startup] ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
 
   // Private-key mode: explicit --public-key, or ./public.pem when no allowlist is given
   // (preserves the original zero-flag behaviour).
@@ -39,12 +46,11 @@ export function runServe(args: string[]): void {
     ? {
         allow,
         audience: getArg(args, '--audience', DEFAULT_AUDIENCE)!,
-        issuers: [GITHUB_ISSUER, GITLAB_ISSUER, ...getArgs(args, '--oidc-issuer')],
       }
     : null;
   if (oidc) {
-    console.log(`[startup] Allowlist mode: ${allow.join(', ')} (audience "${oidc.audience}")`);
-    console.log(`[startup]   Trusted issuers: ${oidc.issuers.join(', ')}`);
+    console.log(`[startup] Allowlist mode: ${allow.map((e) => e.raw).join(', ')} (audience "${oidc.audience}")`);
+    console.log(`[startup]   Trusted issuers: ${trustedIssuers(allow).join(', ')}`);
   }
 
   console.log(`[startup] Starting on port ${port}...`);

@@ -38,9 +38,12 @@ Subcommands:
     Private-key mode (GET /token):
     --public-key <path>           RSA public key PEM               (default: public.pem if no --allow)
     Allowlist mode (POST /token with a CI OIDC token):
-    --allow <owner/repo>          Allowed repo, or owner/* (repeatable or comma-separated)
+    --allow <entry>               Allowed repo (repeatable or comma-separated):
+                                    owner/repo, owner/*            GitHub (same as github:owner/*)
+                                    gitlab:group/project, gitlab:group/*   gitlab.com
+                                    gitlab@https://host:group/*    self-hosted GitLab
+                                  Only issuers named by an entry are trusted.
     --audience <aud>              Expected OIDC audience           (default: agent-gateway)
-    --oidc-issuer <url>           Extra trusted issuer, e.g. self-hosted GitLab (repeatable)
     Both modes can be enabled together.
 
   decrypt-token                 Fetch + decrypt credentials from a running proxy
