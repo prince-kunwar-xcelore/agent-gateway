@@ -162,11 +162,12 @@ CI side:
   decrypt-token                 Fetch + decrypt credentials from a running proxy
     --proxy-url <url>             Proxy URL            (or AGENT_GATEWAY_URL env var)
     --agent <claude|codex>        Credentials to fetch (default: claude)
-    --private-key <path>          RSA private key PEM  (or AGENT_GATEWAY_PRIVATE_KEY env var)
-    Without a private key, uses CI OIDC (allowlist mode):
+    Tries CI OIDC (allowlist mode) first:
     --audience <aud>              OIDC audience        (default: agent-gateway)
     --oidc-token-env <name>       Env var holding an OIDC token (default: AGENT_GATEWAY_OIDC_TOKEN);
                                   falls back to the GitHub Actions OIDC request API
+    Falls back to private-key mode when OIDC is unavailable or refused:
+    --private-key <path>          RSA private key PEM  (or AGENT_GATEWAY_PRIVATE_KEY env var)
 
   generate-keys                 Generate a new RSA-4096 keypair (private-key mode)
     --private-key <path>          Output path          (default: private.pem)
