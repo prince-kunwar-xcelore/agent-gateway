@@ -12,7 +12,8 @@
     "dev:node": "tsx src/index.ts",
     "dev:bun": "bun src/index.ts",
     "start:node": "node dist/index.js",
-    "start:bun": "bun src/index.ts"
+    "start:bun": "bun src/index.ts",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "keytar": "^7.9.0"

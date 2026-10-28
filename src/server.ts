@@ -201,7 +201,7 @@ export function startServer(port: number, opts: ServerOptions): () => void {
     console.log(`[server] Listening on http://localhost:${port}`);
     console.log(`[server]   Agents: ${opts.agents.join(', ')}`);
     if (opts.keyMode) console.log('[server]   GET  /token?agent=<agent> → encrypted with serve public key');
-    if (opts.oidc)    console.log(`[server]   POST /token?agent=<agent> → OIDC allowlist: ${opts.oidc.allow.join(', ')}`);
+    if (opts.oidc)    console.log(`[server]   POST /token?agent=<agent> → OIDC allowlist: ${opts.oidc.allow.map((e) => e.raw).join(', ')}`);
     console.log('[server]   GET  /health');
   });
 

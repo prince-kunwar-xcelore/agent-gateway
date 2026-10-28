@@ -1,15 +1,15 @@
 import crypto from 'node:crypto';
+import { entryAllows, trustedIssuers, type AllowEntry } from './allowlist';
 
 /**
  * Minimal OIDC ID-token verification for CI identity tokens
  * (GitHub Actions, GitLab CI). RS256 only — both platforms sign with it.
  *
  * Flow: decode header → fetch issuer's JWKS via OpenID discovery →
- * verify signature → check iss / aud / exp / nbf → return claims.
+ * verify signature → check iss / aud / exp / nbf → match an allow entry for
+ * that issuer → return claims.
  */
 
-export const GITHUB_ISSUER = 'https://token.actions.githubusercontent.com';
-export const GITLAB_ISSUER = 'https://gitlab.com';
 export const DEFAULT_AUDIENCE = 'agent-gateway';
 
 const JWKS_TTL_MS = 60 * 60 * 1000;
@@ -31,13 +31,14 @@ export interface OidcClaims {
 }
 
 export interface OidcOptions {
-  issuers: string[];
   audience: string;
-  /** Repo patterns: "owner/repo" or "owner/*". */
-  allow: string[];
+  /** Parsed allow entries; their issuers are the only ones trusted. */
+  allow: AllowEntry[];
 }
 
 type Jwk = crypto.JsonWebKey & { kid?: string };
+// The allowlist is fixed for the server's lifetime; derive its issuers once
+const issuersCache = new WeakMap<AllowEntry[], string[]>();
 const jwksCache = new Map<string, { keys: Jwk[]; fetchedAt: number }>();
 
 function b64urlJson<T>(part: string): T {
@@ -68,17 +69,9 @@ export function repoFromClaims(claims: OidcClaims): string | null {
   return claims.repository ?? claims.project_path ?? null;
 }
 
-export function repoAllowed(repo: string, allow: string[]): boolean {
-  const lower = repo.toLowerCase();
-  return allow.some((pattern) => {
-    const p = pattern.toLowerCase();
-    return p.endsWith('/*') ? lower.startsWith(p.slice(0, -1)) : lower === p;
-  });
-}
-
 /**
  * Verify an OIDC ID token and return its claims if it was issued by a trusted
- * issuer, for our audience, to an allowlisted repo. Throws otherwise.
+ * issuer, for our audience, to a repo allowlisted for that issuer. Throws otherwise.
  */
 export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<OidcClaims> {
   const parts = jwt.split('.');
@@ -95,7 +88,12 @@ export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<O
   if (!unverified || typeof unverified !== 'object' || typeof unverified.iss !== 'string') {
     throw new Error('JWT payload has no issuer');
   }
-  const issuer = opts.issuers.find((i) => i.replace(/\/$/, '') === unverified.iss.replace(/\/$/, ''));
+  let issuers = issuersCache.get(opts.allow);
+  if (!issuers) {
+    issuers = trustedIssuers(opts.allow);
+    issuersCache.set(opts.allow, issuers);
+  }
+  const issuer = issuers.find((i) => i.replace(/\/$/, '') === unverified.iss.replace(/\/$/, ''));
   if (!issuer) throw new Error(`Untrusted issuer: ${unverified.iss}`);
 
   let keys = await getJwks(issuer);
@@ -123,9 +121,9 @@ export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<O
   const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!audiences.includes(opts.audience)) throw new Error(`Audience mismatch: expected ${opts.audience}`);
 
-  const repo = repoFromClaims(claims);
-  if (!repo) throw new Error('Token has no repository / project_path claim');
-  if (!repoAllowed(repo, opts.allow)) throw new Error(`Repository not allowlisted: ${repo}`);
+  if (!opts.allow.some((entry) => entryAllows(entry, issuer, claims))) {
+    throw new Error(`Repository not allowlisted for ${issuer}: ${repoFromClaims(claims) ?? '(no repo claim)'}`);
+  }
 
   return claims;
 }

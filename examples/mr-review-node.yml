@@ -11,8 +11,8 @@
 #                                CI_JOB_TOKEN is NOT sufficient — it cannot post
 #                                discussions or call /approve.
 # Auth — one of:
-#   Allowlist (no key):  start the proxy with `serve --allow <group>/<project>`
-#                        (add `--oidc-issuer https://<host>` for self-hosted GitLab).
+#   Allowlist (no key):  start the proxy with `serve --allow gitlab:<group>/<project>`
+#                        (self-hosted GitLab: `--allow gitlab@https://<host>:<group>/*`).
 #                        The job proves its identity with the AGENT_GATEWAY_OIDC_TOKEN id_token below.
 #   Private key:         variable AGENT_GATEWAY_PRIVATE_KEY — contents of your private.pem
 #                        (mask + protect), proxy started with `serve --public-key public.pem`.

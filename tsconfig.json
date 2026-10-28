@@ -9,5 +9,5 @@
     // noEmit: tsup handles the build; tsc is used for type-checking only
     "noEmit": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "test/**/*"]
 }
