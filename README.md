@@ -1,4 +1,4 @@
-# claude-token-proxy
+# agent-gateway
 
 A lightweight daemon that runs on your local machine and securely serves your **Claude** or **Codex** subscription credentials to CI (GitHub Actions, GitLab CI) — so PR reviews run on the subscription you already pay for, without ever exposing the raw credentials.
 
@@ -39,98 +39,140 @@ The allowlist mode verifies the GitHub Actions / GitLab CI ID token against the 
 
 ## Requirements
 
-- [Bun](https://bun.sh) (recommended) or Node.js 20+
+- Node.js 20+ (with pnpm) or [Bun](https://bun.sh)
+- Linux (systemd) for `service`; macOS LaunchAgent support exists but is untested
 - [Claude Code](https://claude.ai/code) and/or [Codex CLI](https://github.com/openai/codex) installed and logged in on your local machine
-- Your machine accessible over the internet on the proxy port (port forward or VPN)
+- A way to reach it from CI: the built-in Cloudflare Tunnel / ngrok helpers, or any port forward / VPN
 
 ---
 
 ## Setup (one-time)
 
-### 1. Clone and install
+### 1. Clone, install, build
 
 ```bash
-git clone https://github.com/prince-kunwar-xcelore/claude-token-proxy.git
-cd claude-token-proxy
-bun install          # or: pnpm install
+git clone https://github.com/prince-kunwar-xcelore/claude-token-proxy.git agent-gateway
+cd agent-gateway
+pnpm install && pnpm build      # the service runs dist/index.js under Node
+alias agent-gateway="node $PWD/dist/index.js"   # or: pnpm link --global
 ```
 
-### 2. Choose auth
+With Bun installed, `bun src/index.ts …` works too and the service will run the sources directly.
 
-**Allowlist mode** needs no keys — skip to step 4 and start with `--allow`. Only `AGENT_GATEWAY_URL` is needed as a CI secret.
-
-**Private-key mode:** generate your keypair
+### 2. Configure
 
 ```bash
-bun src/index.ts generate-keys
+# Allowlist mode (recommended) — only CI jobs from your repos, no keys to distribute
+agent-gateway init --allow 'your-user/*'
+
+# …or private-key mode
+agent-gateway generate-keys --private-key ~/.agent-gateway/keys/private.pem --public-key ~/.agent-gateway/keys/public.pem
+agent-gateway init --public-key ~/.agent-gateway/keys/public.pem
 ```
 
-This creates `private.pem` and `public.pem` in the project root. Both are gitignored — keep them safe.
+This writes `~/.agent-gateway/config.json`. Change it later with `allow add|remove` and
+`mode enable|disable` — a running service is restarted automatically.
 
-### 3. Add secrets to GitHub
+### 3. Run it as a service
 
-In your repo: **Settings → Secrets and variables → Actions**
+```bash
+agent-gateway service install   # systemd user unit (Linux) / LaunchAgent (macOS, untested); starts now + on boot
+agent-gateway service status    # service state + per-agent credential health
+```
+
+On Linux, starting at boot (before you log in) needs lingering: `sudo loginctl enable-linger $USER`
+(`service install` tells you if it's off). The unit only runs `serve --config ~/.agent-gateway/config.json`,
+so later config edits never require reinstalling.
+
+### 4. Expose it publicly (optional helper)
+
+The proxy only listens on localhost; any tunnel works. Two are built in, each installed as a second
+user service (`agent-gateway-tunnel`):
+
+```bash
+# Cloudflare Tunnel — your own domain on Cloudflare; run `cloudflared tunnel login` first.
+# Reuses an existing tunnel with the same --name (default agent-gateway).
+agent-gateway tunnel setup cloudflare --hostname gateway.your-domain.com
+
+# ngrok — the free plan includes one static *.ngrok-free.app domain; custom domains need a paid plan.
+# The authtoken must be in ngrok's config file (ngrok config add-authtoken …), not just an env var.
+agent-gateway tunnel setup ngrok --domain your-name.ngrok-free.app
+
+agent-gateway tunnel status | stop | start | remove
+```
+
+Cloudflare's helper writes its own `~/.agent-gateway/cloudflared.yml` and leaves `~/.cloudflared/config.yml` alone.
+If you point a custom domain at ngrok through Cloudflare DNS, its CNAME must be "DNS only" (grey cloud).
+
+### 5. Add the CI secret
 
 | Secret | Value |
 |--------|-------|
-| `AGENT_GATEWAY_PRIVATE_KEY` | Contents of `private.pem` |
-| `AGENT_GATEWAY_URL` | Your machine's public URL e.g. `http://1.2.3.4:7432` |
+| `AGENT_GATEWAY_URL` | Public URL printed by `tunnel setup`, e.g. `https://gateway.your-domain.com` |
+| `AGENT_GATEWAY_PRIVATE_KEY` | Private-key mode only: contents of `private.pem` |
 
-### 4. Start the daemon
-
-```bash
-# Allowlist mode — only CI jobs from your repos
-bun src/index.ts serve --allow 'your-user/*' --port 7432
-
-# Private-key mode
-bun src/index.ts serve --public-key ./public.pem --port 7432
-
-# Both
-bun src/index.ts serve --public-key ./public.pem --allow 'your-user/*' --port 7432
-
-# Node — build first, then run
-pnpm build
-node dist/index.js serve --public-key ./public.pem --port 7432
-```
-
-### 5. Verify
-
-```bash
-curl http://localhost:7432/health
-# {"ok":true,"modes":{"private_key":true,"allowlist":true},
-#  "agents":{"claude":{"ok":true,"age_seconds":3,...},"codex":{"ok":true,...}}}
-```
-
----
+Then copy a template from `examples/` (see below).
 
 ## CLI Reference
 
 ```
-claude-token-proxy <subcommand> [options]
+agent-gateway — serves your local Claude / Codex subscription credentials, encrypted, over HTTP
 
-Subcommands:
-  serve                         Start the proxy daemon + HTTP server
-    --agents <list>               Agents to serve: claude,codex    (default: claude,codex)
-    --port <number>               HTTP port                        (default: 7432)
-    --public-key <path>           Enable private-key mode          (default: public.pem if no --allow)
-    --allow <entry>               Enable allowlist mode (repeatable / comma-separated):
-                                    owner/repo, owner/*            GitHub (same as github:owner/*)
-                                    gitlab:group/project, gitlab:group/*   gitlab.com
-                                    gitlab@https://host:group/*    self-hosted GitLab
-                                  Only issuers named by an entry are trusted.
-    --audience <aud>              Expected OIDC audience           (default: agent-gateway)
+Usage:
+  agent-gateway <subcommand> [options]
 
+Setup:
+  init                          Write ~/.agent-gateway/config.json
+    --allow <entry>               Enable allowlist mode with this entry (repeatable / comma-separated)
+    --public-key <path>           Enable private-key mode with this public key
+    --port <number>               HTTP port            (default: 7432)
+    --agents <list>               claude,codex         (default: both)
+    --force                       Overwrite an existing config
+
+  service install [--force]     Run as a user service (systemd / launchd), start now and on boot
+  service uninstall | start | stop | restart | enable | disable
+  service status                Service state + /health summary
+  service logs [-f]
+
+  tunnel setup cloudflare --hostname <host> [--name <tunnel>]
+                                Expose via Cloudflare Tunnel (reuses a tunnel with that name)
+  tunnel setup ngrok --domain <domain>
+                                Expose via ngrok (free plan: your one static ngrok domain)
+  tunnel start | stop | status | remove
+
+Config (changes restart a running service; --no-restart to skip):
+  config show | path
+  allow add <entry...> | allow remove <entry...> | allow list
+                                Entries:
+                                  owner/repo, owner/*                    GitHub (same as github:owner/*)
+                                  gitlab:group/project, gitlab:group/*   gitlab.com
+                                  gitlab@https://host:group/*            self-hosted GitLab
+                                Only issuers named by an entry are trusted.
+  mode enable|disable private-key|allowlist [--public-key <path>]
+  mode status
+
+Run:
+  serve                         Start the proxy in the foreground
+    --config <path>               Config file          (default: ~/.agent-gateway/config.json)
+    Flags override the config file field by field:
+    --port, --agents, --allow, --audience <aud>, --public-key <path>
+    With no config file and no --allow, private-key mode uses ./public.pem.
+
+CI side:
   decrypt-token                 Fetch + decrypt credentials from a running proxy
     --proxy-url <url>             Proxy URL            (or AGENT_GATEWAY_URL env var)
     --agent <claude|codex>        Credentials to fetch (default: claude)
     --private-key <path>          RSA private key PEM  (or AGENT_GATEWAY_PRIVATE_KEY env var)
+    Without a private key, uses CI OIDC (allowlist mode):
     --audience <aud>              OIDC audience        (default: agent-gateway)
-    --oidc-token-env <name>       Env var with an OIDC token (default: AGENT_GATEWAY_OIDC_TOKEN);
+    --oidc-token-env <name>       Env var holding an OIDC token (default: AGENT_GATEWAY_OIDC_TOKEN);
                                   falls back to the GitHub Actions OIDC request API
 
-  generate-keys                 Generate a new RSA-4096 keypair
+  generate-keys                 Generate a new RSA-4096 keypair (private-key mode)
     --private-key <path>          Output path          (default: private.pem)
     --public-key  <path>          Output path          (default: public.pem)
+
+All commands accept --config <path>.
 ```
 
 ---
@@ -164,39 +206,23 @@ permissions:
 
 ---
 
-## Running as a persistent service
-
-### Quick (background process)
+## Operating it
 
 ```bash
-nohup bun src/index.ts serve --public-key ./public.pem --port 7432 \
-  > ~/.agent-gateway/proxy.log 2>&1 &
+agent-gateway service status          # is it running, are credentials fresh?
+agent-gateway service logs -f
+agent-gateway allow add gitlab:my-group/*
+agent-gateway allow remove your-user/old-repo
+agent-gateway mode enable private-key --public-key ~/.agent-gateway/keys/public.pem
+agent-gateway config show
 ```
 
-### systemd (Linux)
+Files under `~/.agent-gateway/`: `config.json`, `cloudflared.yml` (if used), the private-key-mode
+token cache, and on macOS the service logs. Running `serve` by hand still works and accepts flags that
+override the config (`serve --allow owner/* --port 7433`), or no config at all.
 
-```ini
-# ~/.config/systemd/user/claude-token-proxy.service
-[Unit]
-Description=Claude Token Proxy
-After=network.target
-
-[Service]
-WorkingDirectory=/path/to/claude-token-proxy
-ExecStart=/usr/local/bin/bun src/index.ts serve --public-key ./public.pem --port 7432
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-```
-
-```bash
-systemctl --user enable --now claude-token-proxy
-```
-
-> An `install-service` subcommand that automates this is planned — see `plans/install-service.md`.
-
----
+If you update Node (e.g. via nvm), reinstall with `service install --force`: the unit pins the absolute
+runtime path it was installed with.
 
 ## Encryption scheme
 
@@ -228,6 +254,10 @@ src/
   args.ts                getArg / hasFlag helpers
   crypto.ts              encryptToken / decryptToken / loadPem
   keys.ts                generateKeypair
+  config.ts              ~/.agent-gateway/config.json load / save / validate / flag overrides
+  allowlist.ts           allow entry parsing (github: / gitlab: / gitlab@issuer:) + matching
+  issuers.ts             built-in GitHub / gitlab.com OIDC issuers
+  service.ts             systemd user units + launchd LaunchAgents (macOS untested)
   token-reader.ts        reads Claude (disk/keychain) and Codex (auth.json) credentials
   daemon.ts              15-min per-agent refresh loop + disk cache + in-memory state
   oidc.ts                CI OIDC token verification + repo allowlist
@@ -237,13 +267,17 @@ src/
     generate-keys.ts     generate-keys subcommand
     decrypt-token.ts     decrypt-token subcommand
     serve.ts             serve subcommand + graceful shutdown
+    config.ts            init / config / allow / mode subcommands
+    service.ts           service subcommand, runtime resolution, health summary
+    tunnel.ts            tunnel subcommand (Cloudflare Tunnel / ngrok)
 examples/
   pr-review-bun.yml      GitHub Actions template using Bun (copy to your repo)
   pr-review-node.yml     GitHub Actions template using Node.js (copy to your repo)
   mr-review-bun.yml      GitLab CI template using Bun
   mr-review-node.yml     GitLab CI template using Node.js
+test/                    node:test suites (pnpm test)
 plans/
-  install-service.md     Plan for automated service installation subcommand
+  install-service.md     Service / config / tunnel CLI design notes
 ```
 
 ---
