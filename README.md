@@ -124,8 +124,6 @@ Subcommands:
     --audience <aud>              OIDC audience        (default: agent-gateway)
     --oidc-token-env <name>       Env var with an OIDC token (default: AGENT_GATEWAY_OIDC_TOKEN);
                                   falls back to the GitHub Actions OIDC request API
-                                  Legacy env names PROXY_URL / PROXY_PRIVATE_KEY / CLAUDE_PROXY_PRIVATE_KEY
-                                  are still read as fallbacks.
 
   generate-keys                 Generate a new RSA-4096 keypair
     --private-key <path>          Output path          (default: private.pem)

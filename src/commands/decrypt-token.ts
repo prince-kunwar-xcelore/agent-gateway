@@ -20,17 +20,12 @@ function resolvePrivateKey(args: string[]): string | null {
       fail(`Could not read private key from: ${privateKeyPath}`);
     }
   }
-  // `||` so an unset CI secret (expanded to "") falls through to OIDC mode.
-  // PROXY_PRIVATE_KEY / CLAUDE_PROXY_PRIVATE_KEY are legacy names.
-  return process.env.AGENT_GATEWAY_PRIVATE_KEY
-    || process.env.PROXY_PRIVATE_KEY
-    || process.env.CLAUDE_PROXY_PRIVATE_KEY
-    || null;
+  // `||` so an unset CI secret (expanded to "") falls through to OIDC mode
+  return process.env.AGENT_GATEWAY_PRIVATE_KEY || null;
 }
 
 export async function runDecryptToken(args: string[]): Promise<void> {
-  // PROXY_URL is the legacy name
-  const proxyUrl = getArg(args, '--proxy-url') || process.env.AGENT_GATEWAY_URL || process.env.PROXY_URL;
+  const proxyUrl = getArg(args, '--proxy-url') || process.env.AGENT_GATEWAY_URL;
   if (!proxyUrl) fail('--proxy-url <url> or AGENT_GATEWAY_URL env var is required');
 
   const agent = getArg(args, '--agent', 'claude') as Agent;
