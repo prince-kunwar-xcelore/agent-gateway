@@ -9,6 +9,9 @@ import {
 import type { Agent } from '../token-reader';
 import { restartIfRunning } from './service';
 
+/** Flags that take a value, so the following argument is not a positional. */
+const VALUE_FLAGS = new Set(['--config', '--public-key', '--port', '--agents', '--allow', '--audience']);
+
 function printConfig(file: string, config: GatewayConfig): void {
   console.log(`# ${file}`);
   console.log(JSON.stringify(config, null, 2));
@@ -73,8 +76,8 @@ export function runAllow(args: string[]): void {
   const [action, ...rest] = args;
   const file = configPath(args);
   const config = requireConfig(file);
-  // Positional patterns: everything that isn't a flag or a flag's value
-  const patterns = rest.filter((a, i) => !a.startsWith('--') && rest[i - 1] !== '--config');
+  // Positional patterns: everything that isn't a flag or a value-taking flag's value
+  const patterns = rest.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(rest[i - 1]));
 
   if (action === 'list') {
     if (!config.allowlist.allow.length) console.log('(empty)');

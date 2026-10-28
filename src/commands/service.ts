@@ -52,7 +52,12 @@ export function restartIfRunning(args: string[]): void {
     return;
   }
   let manager;
-  try { manager = serviceManager(); } catch { return; }
+  try {
+    manager = serviceManager();
+  } catch (err) {
+    console.warn(`[service] Could not check the service (${err instanceof Error ? err.message : String(err)}); restart it yourself if it is running.`);
+    return;
+  }
 
   const spec = { name: PROXY_SERVICE, description: '', command: [] };
   if (!manager.state(spec).active) {
@@ -66,6 +71,7 @@ export function restartIfRunning(args: string[]): void {
 interface Health {
   ok: boolean;
   modes: { private_key: boolean; allowlist: boolean };
+  warnings?: string[];
   agents: Record<string, { ok: boolean; age_seconds: number | null; last_error: string | null }>;
 }
 
@@ -87,6 +93,7 @@ export function printHealth(health: Health | null, config: GatewayConfig): void 
   console.log(`  health:     ${health.ok ? 'ok' : 'DEGRADED'}`);
   console.log(`  modes:      ${modes.join(', ') || '(none)'}`);
   if (health.modes.allowlist) console.log(`  allowlist:  ${config.allowlist.allow.join(', ') || '(empty)'}`);
+  for (const w of health.warnings ?? []) console.log(`  warning:    ${w}`);
   for (const [agent, s] of Object.entries(health.agents)) {
     const age = s.age_seconds === null ? 'never refreshed' : `refreshed ${s.age_seconds}s ago`;
     console.log(`  ${agent.padEnd(10)}  ${s.ok ? 'ok' : 'FAIL'}, ${age}${s.last_error ? ` — ${s.last_error}` : ''}`);

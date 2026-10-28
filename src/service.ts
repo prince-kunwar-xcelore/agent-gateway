@@ -69,7 +69,11 @@ function servicePath(spec: ServiceSpec): string {
 
 // ── systemd (Linux) ──────────────────────────────────────────────────────────
 
-const systemdQuote = (arg: string): string => (/[\s"'\\]/.test(arg) ? `"${arg.replace(/(["\\])/g, '\\$1')}"` : arg);
+// Quote for ExecStart; `$` and `%` would otherwise be expanded as variables / specifiers
+export const systemdQuote = (arg: string): string => {
+  const escaped = arg.replace(/\$/g, '$$$$').replace(/%/g, '%%');
+  return /[\s"'\\]/.test(escaped) ? `"${escaped.replace(/(["\\])/g, '\\$1')}"` : escaped;
+};
 
 const systemd: ServiceManager = {
   unitPath: (spec) => path.join(os.homedir(), '.config', 'systemd', 'user', `${spec.name}.service`),

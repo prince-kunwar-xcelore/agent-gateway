@@ -55,7 +55,12 @@ export function loadConfig(file: string): GatewayConfig | null {
     throw err;
   }
 
-  const parsed = JSON.parse(raw) as Partial<GatewayConfig>;
+  let parsed: Partial<GatewayConfig>;
+  try {
+    parsed = JSON.parse(raw) as Partial<GatewayConfig>;
+  } catch (err) {
+    throw new Error(`Invalid JSON in ${file}: ${err instanceof Error ? err.message : String(err)}`);
+  }
   const defaults = defaultConfig();
   return {
     ...defaults,

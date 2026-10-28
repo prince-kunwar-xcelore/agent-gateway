@@ -58,3 +58,9 @@ test('validateConfig rejects both modes off, bad entries and unknown agents', ()
   assert.match(errors, /Invalid allow entry/);
   assert.match(errors, /Unknown agent/);
 });
+
+test('corrupt config files report the file path', () => {
+  const file = tmpConfig();
+  fs.writeFileSync(file, '{ "port": 7432, ');
+  assert.throws(() => loadConfig(file), new RegExp(`Invalid JSON in ${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+});

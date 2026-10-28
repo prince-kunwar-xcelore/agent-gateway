@@ -43,7 +43,13 @@ function setupCloudflare(args: string[], config: GatewayConfig): { spec: Service
   const findTunnel = (): { id: string; name: string } | undefined => {
     const list = exec(cloudflared, ['tunnel', 'list', '--output', 'json']);
     if (!list.ok) throw new Error(`cloudflared tunnel list failed: ${list.stderr}`);
-    return (JSON.parse(list.stdout || '[]') as { id: string; name: string }[]).find((t) => t.name === name);
+    // cloudflared may print notices (e.g. update available) before the JSON
+    const json = list.stdout.slice(Math.max(0, list.stdout.indexOf('[')));
+    try {
+      return (JSON.parse(json || '[]') as { id: string; name: string }[]).find((t) => t.name === name);
+    } catch {
+      throw new Error(`Could not parse "cloudflared tunnel list" output:\n${list.stdout.slice(0, 300)}`);
+    }
   };
   let tunnel = findTunnel();
   if (tunnel) {
