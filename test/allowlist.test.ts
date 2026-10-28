@@ -46,3 +46,8 @@ test('owner/* does not match an empty repo name', () => {
   assert.equal(entryAllows(entry, GITHUB_ISSUER, { repository: 'owner/' }), false);
   assert.equal(entryAllows(entry, GITHUB_ISSUER, { repository: 'owner/r' }), true);
 });
+
+test('self-hosted issuers are normalised to match the token iss', () => {
+  assert.equal(parseAllowEntry('gitlab@https://Git.Example.COM:443/:team/*').issuer, 'https://git.example.com');
+  assert.equal(parseAllowEntry('gitlab@https://git.example.com/gitlab/:team/*').issuer, 'https://git.example.com/gitlab');
+});

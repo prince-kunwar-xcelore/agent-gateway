@@ -51,12 +51,16 @@ export function parseAllowEntry(entry: string): AllowEntry {
     const rest = trimmed.slice('gitlab@'.length);
     const idx = rest.lastIndexOf(':');
     if (idx <= 0) throw new Error(`Invalid allow entry "${entry}": expected gitlab@https://host:group/*`);
-    issuer = rest.slice(0, idx).replace(/\/$/, '');
+    let url: URL;
     try {
-      if (new URL(issuer).protocol !== 'https:') throw new Error();
+      url = new URL(rest.slice(0, idx));
+      if (url.protocol !== 'https:') throw new Error();
     } catch {
       throw new Error(`Invalid allow entry "${entry}": issuer must be an https URL`);
     }
+    // Normalise (lower-case host, default port dropped, no trailing slash) so it compares
+    // equal to the token's `iss`
+    issuer = `${url.origin}${url.pathname}`.replace(/\/$/, '');
     platform = 'gitlab';
     pattern = rest.slice(idx + 1);
   } else if (trimmed.startsWith('gitlab:')) {

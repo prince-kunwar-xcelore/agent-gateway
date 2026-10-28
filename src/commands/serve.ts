@@ -17,6 +17,12 @@ export function runServe(args: string[]): void {
     process.exit(1);
   }
 
+  if (getArgs(args, '--oidc-issuer').length) {
+    console.error('[startup] --oidc-issuer was removed: name the issuer in the allow entry instead,');
+    console.error('[startup]   e.g. --allow gitlab@https://git.example.com:group/*  (gitlab.com: --allow gitlab:group/*)');
+    process.exit(1);
+  }
+
   let allow;
   try {
     allow = parseAllowList(getArgs(args, '--allow'));
