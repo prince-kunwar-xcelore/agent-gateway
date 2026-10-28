@@ -6,15 +6,15 @@
 # Pick the agent whose subscription reviews the MR with REVIEW_AGENT below.
 #
 # Required GitLab CI/CD Variables (Settings → CI/CD → Variables):
-#   CLAUDE_PROXY_URL          — public URL of your proxy, e.g. https://you.ngrok-free.app
+#   AGENT_GATEWAY_URL         — public URL of your proxy, e.g. https://you.ngrok-free.app
 #   GITLAB_TOKEN              — personal/project access token with `api` scope
 #                                CI_JOB_TOKEN is NOT sufficient — it cannot post
 #                                discussions or call /approve.
 # Auth — one of:
 #   Allowlist (no key):  start the proxy with `serve --allow <group>/<project>`
 #                        (add `--oidc-issuer https://<host>` for self-hosted GitLab).
-#                        The job proves its identity with the PROXY_OIDC_TOKEN id_token below.
-#   Private key:         variable CLAUDE_PROXY_PRIVATE_KEY — contents of your private.pem
+#                        The job proves its identity with the AGENT_GATEWAY_OIDC_TOKEN id_token below.
+#   Private key:         variable AGENT_GATEWAY_PRIVATE_KEY — contents of your private.pem
 #                        (mask + protect), proxy started with `serve --public-key public.pem`.
 #                        When set it takes precedence over OIDC.
 
@@ -27,8 +27,8 @@ mr-review:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   id_tokens:
-    PROXY_OIDC_TOKEN:
-      aud: agent-token-proxy
+    AGENT_GATEWAY_OIDC_TOKEN:
+      aud: agent-gateway
   variables:
     REVIEW_AGENT: claude   # claude | codex
     GLAB_VERSION: "1.65.0"

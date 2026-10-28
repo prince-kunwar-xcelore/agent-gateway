@@ -6,11 +6,11 @@
 # Pick the agent whose subscription reviews the PR with REVIEW_AGENT below.
 #
 # Required GitHub Secrets (Settings → Secrets → Actions):
-#   CLAUDE_PROXY_URL          — public URL of your proxy, e.g. https://you.ngrok-free.app
+#   AGENT_GATEWAY_URL         — public URL of your proxy, e.g. https://you.ngrok-free.app
 # Auth — one of:
 #   Allowlist (no key):  start the proxy with `serve --allow <owner>/<repo>`. Nothing else needed;
 #                        the job proves its identity with GitHub OIDC (id-token: write below).
-#   Private key:         secret CLAUDE_PROXY_PRIVATE_KEY — contents of your private.pem,
+#   Private key:         secret AGENT_GATEWAY_PRIVATE_KEY — contents of your private.pem,
 #                        proxy started with `serve --public-key public.pem`.
 #                        When this secret is set it takes precedence over OIDC.
 
@@ -68,8 +68,8 @@ jobs:
 
       - name: Run PR Review
         env:
-          CLAUDE_PROXY_PRIVATE_KEY: ${{ secrets.CLAUDE_PROXY_PRIVATE_KEY }}
-          PROXY_URL: ${{ secrets.CLAUDE_PROXY_URL }}
+          AGENT_GATEWAY_PRIVATE_KEY: ${{ secrets.AGENT_GATEWAY_PRIVATE_KEY }}
+          AGENT_GATEWAY_URL: ${{ secrets.AGENT_GATEWAY_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tsx ${{ github.workspace }}/_claude-audit-tool/src/index.ts "${{ github.event.pull_request.html_url }}" \

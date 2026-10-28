@@ -4,12 +4,10 @@ import path from 'node:path';
 import { encryptToken } from './crypto';
 import { readCredentials, type Agent } from './token-reader';
 
-const CACHE_DIR  = path.join(os.homedir(), '.claude-proxy');
+const CACHE_DIR  = path.join(os.homedir(), '.agent-gateway');
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
-// Claude keeps its original cache filename so existing caches stay valid.
-const cacheFile = (agent: Agent): string =>
-  path.join(CACHE_DIR, agent === 'claude' ? 'last-token.enc' : `last-token-${agent}.enc`);
+const cacheFile = (agent: Agent): string => path.join(CACHE_DIR, `last-token-${agent}.enc`);
 
 export interface AgentState {
   /** Raw credentials — kept in memory only, never written to disk. */

@@ -8,7 +8,7 @@ private.pem
 public.pem
 
 # Token cache
-~/.claude-proxy/
+~/.agent-gateway/
 
 # Environment files
 .env

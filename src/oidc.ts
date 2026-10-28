@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 
 export const GITHUB_ISSUER = 'https://token.actions.githubusercontent.com';
 export const GITLAB_ISSUER = 'https://gitlab.com';
-export const DEFAULT_AUDIENCE = 'agent-token-proxy';
+export const DEFAULT_AUDIENCE = 'agent-gateway';
 
 const JWKS_TTL_MS = 60 * 60 * 1000;
 const CLOCK_SKEW_S = 60;

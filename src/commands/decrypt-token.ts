@@ -20,13 +20,18 @@ function resolvePrivateKey(args: string[]): string | null {
       fail(`Could not read private key from: ${privateKeyPath}`);
     }
   }
-  // `||` so an unset CI secret (expanded to "") falls through to OIDC mode
-  return process.env.PROXY_PRIVATE_KEY || process.env.CLAUDE_PROXY_PRIVATE_KEY || null;
+  // `||` so an unset CI secret (expanded to "") falls through to OIDC mode.
+  // PROXY_PRIVATE_KEY / CLAUDE_PROXY_PRIVATE_KEY are legacy names.
+  return process.env.AGENT_GATEWAY_PRIVATE_KEY
+    || process.env.PROXY_PRIVATE_KEY
+    || process.env.CLAUDE_PROXY_PRIVATE_KEY
+    || null;
 }
 
 export async function runDecryptToken(args: string[]): Promise<void> {
-  const proxyUrl = getArg(args, '--proxy-url') ?? process.env.PROXY_URL;
-  if (!proxyUrl) fail('--proxy-url <url> or PROXY_URL env var is required');
+  // PROXY_URL is the legacy name
+  const proxyUrl = getArg(args, '--proxy-url') || process.env.AGENT_GATEWAY_URL || process.env.PROXY_URL;
+  if (!proxyUrl) fail('--proxy-url <url> or AGENT_GATEWAY_URL env var is required');
 
   const agent = getArg(args, '--agent', 'claude') as Agent;
   if (!AGENTS.includes(agent)) fail(`Unknown agent "${agent}". Supported: ${AGENTS.join(', ')}`);
@@ -42,11 +47,11 @@ export async function runDecryptToken(args: string[]): Promise<void> {
   } else {
     // Allowlist mode: identify via CI OIDC, receive credentials encrypted to a one-off key
     const audience = getArg(args, '--audience', DEFAULT_AUDIENCE)!;
-    const oidcEnv = getArg(args, '--oidc-token-env', 'PROXY_OIDC_TOKEN')!;
+    const oidcEnv = getArg(args, '--oidc-token-env', 'AGENT_GATEWAY_OIDC_TOKEN')!;
     const oidcToken = await getCiOidcToken(audience, oidcEnv);
     if (!oidcToken) {
       fail(
-        'No credentials to authenticate with. Provide --private-key / PROXY_PRIVATE_KEY, ' +
+        'No credentials to authenticate with. Provide --private-key / AGENT_GATEWAY_PRIVATE_KEY, ' +
         'or run in CI with OIDC (GitHub: `permissions: id-token: write`; ' +
         `GitLab: \`id_tokens: ${oidcEnv}: aud: ${audience}\`).`,
       );

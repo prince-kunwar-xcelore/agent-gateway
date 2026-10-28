@@ -119,9 +119,9 @@ systemctl --user daemon-reload
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string><home>/.claude-proxy/proxy.log</string>
+  <string><home>/.agent-gateway/proxy.log</string>
   <key>StandardErrorPath</key>
-  <string><home>/.claude-proxy/proxy-error.log</string>
+  <string><home>/.agent-gateway/proxy-error.log</string>
 </dict>
 </plist>
 ```

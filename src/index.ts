@@ -39,17 +39,17 @@ Subcommands:
     --public-key <path>           RSA public key PEM               (default: public.pem if no --allow)
     Allowlist mode (POST /token with a CI OIDC token):
     --allow <owner/repo>          Allowed repo, or owner/* (repeatable or comma-separated)
-    --audience <aud>              Expected OIDC audience           (default: agent-token-proxy)
+    --audience <aud>              Expected OIDC audience           (default: agent-gateway)
     --oidc-issuer <url>           Extra trusted issuer, e.g. self-hosted GitLab (repeatable)
     Both modes can be enabled together.
 
   decrypt-token                 Fetch + decrypt credentials from a running proxy
-    --proxy-url <url>             Proxy URL            (or PROXY_URL env var)
+    --proxy-url <url>             Proxy URL            (or AGENT_GATEWAY_URL env var)
     --agent <claude|codex>        Credentials to fetch (default: claude)
-    --private-key <path>          RSA private key PEM  (or PROXY_PRIVATE_KEY / CLAUDE_PROXY_PRIVATE_KEY env var)
+    --private-key <path>          RSA private key PEM  (or AGENT_GATEWAY_PRIVATE_KEY env var)
     Without a private key, uses CI OIDC (allowlist mode):
-    --audience <aud>              OIDC audience        (default: agent-token-proxy)
-    --oidc-token-env <name>       Env var holding an OIDC token (default: PROXY_OIDC_TOKEN);
+    --audience <aud>              OIDC audience        (default: agent-gateway)
+    --oidc-token-env <name>       Env var holding an OIDC token (default: AGENT_GATEWAY_OIDC_TOKEN);
                                   falls back to the GitHub Actions OIDC request API
 
   generate-keys                 Generate a new RSA-4096 keypair
