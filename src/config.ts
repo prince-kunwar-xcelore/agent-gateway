@@ -45,6 +45,8 @@ export function configPath(args: string[]): string {
   return path.resolve(getArg(args, '--config', DEFAULT_CONFIG_PATH)!);
 }
 
+const isObject = (v: unknown): v is object => typeof v === 'object' && v !== null && !Array.isArray(v);
+
 /** Load the config file, or null if it does not exist. Missing fields fall back to defaults. */
 export function loadConfig(file: string): GatewayConfig | null {
   let raw: string;
@@ -65,8 +67,9 @@ export function loadConfig(file: string): GatewayConfig | null {
   return {
     ...defaults,
     ...parsed,
-    privateKey: { ...defaults.privateKey, ...parsed.privateKey },
-    allowlist: { ...defaults.allowlist, ...parsed.allowlist },
+    // Keep non-object values as-is so validateConfig can report them
+    privateKey: isObject(parsed.privateKey) ? { ...defaults.privateKey, ...parsed.privateKey } : parsed.privateKey === undefined ? defaults.privateKey : parsed.privateKey,
+    allowlist: isObject(parsed.allowlist) ? { ...defaults.allowlist, ...parsed.allowlist } : parsed.allowlist === undefined ? defaults.allowlist : parsed.allowlist,
   };
 }
 
@@ -88,6 +91,14 @@ export function saveConfig(file: string, config: GatewayConfig): void {
 
 /** Problems that make a config unusable. Empty when valid. */
 export function validateConfig(config: GatewayConfig): string[] {
+  // Hand-edited files can have the wrong types; check shape before using the values
+  const shapeErrors: string[] = [];
+  if (!Array.isArray(config.agents)) shapeErrors.push('"agents" must be an array');
+  if (!config.privateKey || typeof config.privateKey !== 'object') shapeErrors.push('"privateKey" must be an object');
+  if (!config.allowlist || typeof config.allowlist !== 'object') shapeErrors.push('"allowlist" must be an object');
+  else if (!Array.isArray(config.allowlist.allow)) shapeErrors.push('"allowlist.allow" must be an array');
+  if (shapeErrors.length) return shapeErrors;
+
   const errors: string[] = [];
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) errors.push(`Invalid port: ${config.port}`);
 

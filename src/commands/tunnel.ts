@@ -190,8 +190,8 @@ export async function runTunnel(args: string[]): Promise<void> {
     }
 
     case 'remove': {
-      manager.uninstall(stub);
       const config = requireConfig(file);
+      manager.uninstall(stub);
       delete config.tunnel;
       saveConfig(file, config);
       console.log('[tunnel] Removed the tunnel service. Cloudflare tunnels and DNS records are left in place;');

@@ -58,6 +58,8 @@ function query(cmd: string, args: string[]): string {
 /** Absolute path of an executable on PATH, or null. */
 export function which(bin: string): string | null {
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    // Empty / relative entries would resolve against the cwd and end up in a unit file
+    if (!path.isAbsolute(dir)) continue;
     const candidate = path.join(dir, bin);
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
@@ -92,7 +94,7 @@ Wants=network-online.target
 
 [Service]
 ExecStart=${spec.command.map(systemdQuote).join(' ')}
-WorkingDirectory=${GATEWAY_DIR}
+WorkingDirectory=${GATEWAY_DIR.replace(/%/g, '%%')}
 Environment=HOME=${os.homedir()}
 Environment=PATH=${servicePath(spec)}
 Restart=on-failure
@@ -101,6 +103,7 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 `;
+    fs.mkdirSync(GATEWAY_DIR, { recursive: true, mode: 0o700 });
     fs.mkdirSync(path.dirname(this.unitPath(spec)), { recursive: true });
     fs.writeFileSync(this.unitPath(spec), unit);
     run('systemctl', ['--user', 'daemon-reload']);

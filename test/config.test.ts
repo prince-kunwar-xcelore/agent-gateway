@@ -64,3 +64,12 @@ test('corrupt config files report the file path', () => {
   fs.writeFileSync(file, '{ "port": 7432, ');
   assert.throws(() => loadConfig(file), new RegExp(`Invalid JSON in ${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 });
+
+test('validateConfig reports wrongly typed fields from hand-edited files', () => {
+  const file = tmpConfig();
+  fs.writeFileSync(file, JSON.stringify({ agents: 'claude', privateKey: null, allowlist: { enabled: true, allow: 'x/*' } }));
+  const errors = validateConfig(loadConfig(file)!).join('\n');
+  assert.match(errors, /"agents" must be an array/);
+  assert.match(errors, /"privateKey" must be an object/);
+  assert.match(errors, /"allowlist.allow" must be an array/);
+});
