@@ -40,3 +40,9 @@ test('a GitHub entry does not match a gitlab.com namespace with the same name', 
   assert.equal(entryAllows(gitlab, GITLAB_ISSUER, { repository: 'owner/repo' }), false);
   assert.equal(entryAllows(gitlab, GITLAB_ISSUER, { project_path: 'Owner/Sub/Repo' }), true);
 });
+
+test('owner/* does not match an empty repo name', () => {
+  const [entry] = parseAllowList(['owner/*']);
+  assert.equal(entryAllows(entry, GITHUB_ISSUER, { repository: 'owner/' }), false);
+  assert.equal(entryAllows(entry, GITHUB_ISSUER, { repository: 'owner/r' }), true);
+});

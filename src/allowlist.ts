@@ -91,7 +91,10 @@ export function trustedIssuers(allow: AllowEntry[]): string[] {
 
 export function patternMatches(repo: string, pattern: string): boolean {
   const lower = repo.toLowerCase();
-  return pattern.endsWith('/*') ? lower.startsWith(pattern.slice(0, -1)) : lower === pattern;
+  if (!pattern.endsWith('/*')) return lower === pattern;
+  const prefix = pattern.slice(0, -1);
+  // `owner/*` needs something after the slash: `owner/` alone is not a repo
+  return lower.length > prefix.length && lower.startsWith(prefix);
 }
 
 /**
