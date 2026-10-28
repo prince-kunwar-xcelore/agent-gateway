@@ -132,6 +132,7 @@ export function runMode(args: string[]): void {
   const enable = action === 'enable';
   if (mode === 'private-key') {
     const publicKey = getArg(args, '--public-key');
+    if (publicKey && !enable) throw new Error('--public-key only applies to "mode enable private-key"');
     if (publicKey) config.privateKey.publicKeyPath = path.resolve(publicKey);
     if (enable) {
       const keyPath = config.privateKey.publicKeyPath;

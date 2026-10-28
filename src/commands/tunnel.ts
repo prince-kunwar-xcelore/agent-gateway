@@ -43,8 +43,10 @@ function setupCloudflare(args: string[], config: GatewayConfig): { spec: Service
   const findTunnel = (): { id: string; name: string } | undefined => {
     const list = exec(cloudflared, ['tunnel', 'list', '--output', 'json']);
     if (!list.ok) throw new Error(`cloudflared tunnel list failed: ${list.stderr}`);
-    // cloudflared may print notices (e.g. update available) before the JSON
-    const json = list.stdout.slice(Math.max(0, list.stdout.indexOf('[')));
+    // cloudflared may print notices (e.g. "[WARNING] …") before the JSON array, which
+    // starts with `[` followed by `{` or `]` at the start of a line
+    const start = /^\[\s*[{\]]/m.exec(list.stdout)?.index ?? 0;
+    const json = list.stdout.slice(start);
     try {
       return (JSON.parse(json || '[]') as { id: string; name: string }[]).find((t) => t.name === name);
     } catch {
@@ -74,13 +76,16 @@ function setupCloudflare(args: string[], config: GatewayConfig): { spec: Service
 
   // Dedicated config so ~/.cloudflared/config.yml is left alone
   fs.mkdirSync(GATEWAY_DIR, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(CLOUDFLARED_CONFIG, `tunnel: ${tunnel.id}
-credentials-file: ${credentials}
+  // JSON strings are valid YAML scalars, so values are quoted safely
+  const q = JSON.stringify;
+  fs.writeFileSync(CLOUDFLARED_CONFIG, `tunnel: ${q(tunnel.id)}
+credentials-file: ${q(credentials)}
 ingress:
-  - hostname: ${hostname}
-    service: http://localhost:${config.port}
+  - hostname: ${q(hostname)}
+    service: ${q(`http://localhost:${config.port}`)}
   - service: http_status:404
-`);
+`, { mode: 0o600 });
+  fs.chmodSync(CLOUDFLARED_CONFIG, 0o600);
   console.log(`[tunnel] Wrote ${CLOUDFLARED_CONFIG}`);
 
   return {
@@ -103,7 +108,8 @@ function setupNgrok(args: string[], config: GatewayConfig): { spec: ServiceSpec;
 
   // The service won't see shell env vars, so the authtoken must be in ngrok's config file
   const check = exec(ngrok, ['config', 'check']);
-  const configFile = /at (\S+)/.exec(check.stdout + check.stderr)?.[1];
+  // "Valid configuration file at /path/ngrok.yml" — the path may contain spaces
+  const configFile = /configuration file at (.+?)\s*$/m.exec(check.stdout + '\n' + check.stderr)?.[1];
   const hasToken = configFile && fs.existsSync(configFile) && /authtoken:/.test(fs.readFileSync(configFile, 'utf8'));
   if (!hasToken) {
     throw new Error('No ngrok authtoken in its config file. Run "ngrok config add-authtoken <token>" (an env var alone is not visible to the service).');

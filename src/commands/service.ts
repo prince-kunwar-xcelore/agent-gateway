@@ -144,8 +144,9 @@ export async function runService(args: string[]): Promise<void> {
     case 'stop':
     case 'restart': {
       if (!manager.state(stub).installed) throw new Error('Service is not installed. Run "service install".');
-      if (action !== 'stop' && !manager.state(stub).active && (await portInUse(requireConfig(file).port))) {
-        throw new Error(`Port ${requireConfig(file).port} is already in use (a manually started proxy?). Stop it first.`);
+      if (action !== 'stop' && !manager.state(stub).active) {
+        const { port } = requireConfig(file);
+        if (await portInUse(port)) throw new Error(`Port ${port} is already in use (a manually started proxy?). Stop it first.`);
       }
       manager[action](stub);
       console.log(`[service] ${action === 'stop' ? 'Stopped' : action === 'start' ? 'Started' : 'Restarted'}.`);

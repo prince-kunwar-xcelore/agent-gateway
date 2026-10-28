@@ -41,7 +41,13 @@ interface ServiceManager {
 }
 
 function run(cmd: string, args: string[]): string {
-  return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  try {
+    return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  } catch (err) {
+    // Surface the tool's own explanation; the top-level handler only prints the message
+    const stderr = (err as { stderr?: string }).stderr?.trim();
+    throw new Error(`${cmd} ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`);
+  }
 }
 
 /** Run and return stdout even when the command exits non-zero (e.g. `systemctl is-active`). */
