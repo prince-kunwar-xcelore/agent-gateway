@@ -26,6 +26,9 @@ mr-review:
   image: node:20
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  # pr-audit exits 3 when the agent's usage limit is hit: show "passed with warnings", not failed
+  allow_failure:
+    exit_codes: [3]
   id_tokens:
     AGENT_GATEWAY_OIDC_TOKEN:
       aud: agent-gateway

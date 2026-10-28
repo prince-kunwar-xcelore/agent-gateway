@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import { getArg } from '../args';
 import { loadPem, decryptToken } from '../crypto';
@@ -52,7 +53,7 @@ export async function runDecryptToken(args: string[]): Promise<void> {
       );
     }
 
-    const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+    const { privateKey, publicKey } = await promisify(crypto.generateKeyPair)('rsa', {
       modulusLength: 4096,
       publicKeyEncoding: { type: 'spki', format: 'pem' },
       privateKeyEncoding: { type: 'pkcs8', format: 'pem' },

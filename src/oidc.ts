@@ -84,6 +84,8 @@ export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<O
 
   const header = b64urlJson<{ alg: string; kid?: string }>(headerB64);
   if (header.alg !== 'RS256') throw new Error(`Unsupported JWT alg: ${header.alg}`);
+  // Without a kid, find() would match any JWKS entry that also lacks one
+  if (!header.kid) throw new Error('JWT header has no kid');
 
   // Trust the issuer only after checking it against our list — it selects the JWKS.
   const unverified = b64urlJson<OidcClaims>(payloadB64);

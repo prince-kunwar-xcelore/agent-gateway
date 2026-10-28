@@ -65,6 +65,7 @@ export async function getCiOidcToken(audience: string, envVar: string): Promise<
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`GitHub OIDC token request failed: HTTP ${res.status}`);
-  const { value } = (await res.json()) as { value: string };
+  const { value } = (await res.json()) as { value?: unknown };
+  if (typeof value !== 'string' || !value) throw new Error('GitHub OIDC token response has no token value');
   return value;
 }

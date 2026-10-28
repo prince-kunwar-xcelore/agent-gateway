@@ -35,7 +35,10 @@ export function createServer(opts: ServerOptions): http.Server {
     if (url.pathname === '/token' && req.method === 'GET') {
       handleKeyToken(url, res, opts);
     } else if (url.pathname === '/token' && req.method === 'POST') {
-      void handleOidcToken(url, req, res, opts);
+      handleOidcToken(url, req, res, opts).catch((err: unknown) => {
+        console.error(`[server] POST /token failed: ${err instanceof Error ? err.message : String(err)}`);
+        if (!res.headersSent) sendJson(res, 500, { error: 'Internal error' });
+      });
     } else if (url.pathname === '/health' && req.method === 'GET') {
       handleHealth(res, opts);
     } else if (url.pathname === '/token' || url.pathname === '/health') {
