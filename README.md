@@ -34,6 +34,9 @@ expiry (Claude: 10 minutes; Codex: 1 day, since Codex refreshes ~2 days before i
 the daemon runs the CLI once with a trivial prompt (`claude -p 'Reply with OK' --tools ''` /
 `codex exec … 'Reply with OK'`), which makes it refresh its own credentials file. This costs one tiny
 request per refresh (about every 8 hours for Claude). It is rate-limited to one run per 4 minutes per agent.
+Claude may leave a token that still has several minutes left unchanged, so the first run doesn't always renew
+it; the daemon tries again 4 minutes later (seen in practice: renewed on the second run, within 5 minutes of
+expiry). `service logs` shows each attempt.
 
 Credentials expiring within 2 minutes are never served: `/token` returns 503 and `/health` shows the
 agent as failing with the reason (e.g. a local refresh that failed because you were logged out). The
