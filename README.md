@@ -31,7 +31,7 @@ refresh in CI would otherwise log out the CLI on your machine.
 
 Because CI can't refresh, the gateway keeps the local login fresh itself. When an access token is close to
 expiry (Claude: 10 minutes; Codex: 1 day, since Codex refreshes ~2 days before its 10-day tokens expire),
-the daemon runs the CLI once with a trivial prompt (`claude -p 'Reply with OK'` /
+the daemon runs the CLI once with a trivial prompt (`claude -p 'Reply with OK' --tools ''` /
 `codex exec … 'Reply with OK'`), which makes it refresh its own credentials file. This costs one tiny
 request per refresh (about every 8 hours for Claude). It is rate-limited to one run per 4 minutes per agent.
 

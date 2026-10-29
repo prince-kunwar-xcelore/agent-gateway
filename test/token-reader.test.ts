@@ -7,7 +7,7 @@ import { readCredentials } from '../src/token-reader';
 
 const tmpHome = (): string => fs.mkdtempSync(path.join(os.tmpdir(), 'gw-home-'));
 
-test('errors say why each Claude credentials file was skipped', async () => {
+test('errors say why each Claude credentials file was skipped', async (t) => {
   const home = tmpHome();
   fs.mkdirSync(path.join(home, '.claude'));
   fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), '{ not json');
@@ -15,14 +15,15 @@ test('errors say why each Claude credentials file was skipped', async () => {
   const savedHome = process.env.HOME;
   process.env.HOME = home;
   try {
-    await assert.rejects(readCredentials('claude'), (err: Error) => {
-      assert.match(err.message, /\.credentials\.json: invalid JSON/);
-      assert.match(err.message, /auth\.json: no access token in it/);
-      assert.match(err.message, /keychain: /);
-      return true;
-    });
+    const err = await readCredentials('claude').then(() => null, (e: Error) => e);
+    // The keychain is the host's own: with a real Claude entry there, nothing is rejected
+    if (!err) return t.skip('a Claude keychain entry exists on this machine');
+    assert.match(err.message, /\.credentials\.json: invalid JSON/);
+    assert.match(err.message, /auth\.json: no access token in it/);
+    assert.match(err.message, /keychain: /);
   } finally {
-    process.env.HOME = savedHome;
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
   }
 });
 

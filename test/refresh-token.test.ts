@@ -91,7 +91,8 @@ JSON
     assert.ok(!state.credentials!.includes('r2'));
     assert.ok(state.expiresAt!.getTime() > Date.now() + 7 * 3600 * 1000);
   } finally {
-    process.env.HOME = saved.HOME;
+    if (saved.HOME === undefined) delete process.env.HOME;
+    else process.env.HOME = saved.HOME;
     process.env.PATH = saved.PATH;
   }
 });
