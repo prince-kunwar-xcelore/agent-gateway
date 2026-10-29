@@ -15,6 +15,8 @@ export interface ServerOptions {
 }
 
 const MAX_BODY_BYTES = 16 * 1024;
+// Random per process, reported by /health so "tunnel setup" can tell that a public URL reaches this proxy
+const INSTANCE_ID = crypto.randomBytes(8).toString('hex');
 
 class BodyTooLargeError extends Error {}
 
@@ -203,6 +205,7 @@ function handleHealth(res: http.ServerResponse, opts: ServerOptions): void {
 
   sendJson(res, 200, {
     ok,
+    instance_id: INSTANCE_ID,
     modes: { private_key: opts.keyMode, allowlist: opts.oidc !== null },
     ...(warnings.length ? { warnings } : {}),
     agents,

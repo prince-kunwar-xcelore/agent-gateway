@@ -29,7 +29,7 @@ export interface ServiceState {
   detail: string;
 }
 
-interface ServiceManager {
+export interface ServiceManager {
   unitPath(spec: ServiceSpec): string;
   install(spec: ServiceSpec): void;
   uninstall(spec: ServiceSpec): void;
