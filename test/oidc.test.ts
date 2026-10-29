@@ -68,7 +68,7 @@ test('claim constraints narrow an entry to matching refs, events and workflows',
   assert.equal((await verifyOidcToken(mint(GITHUB_ISSUER, pr), constrained)).repository, 'owner/repo');
   await assert.rejects(
     verifyOidcToken(mint(GITHUB_ISSUER, { ...pr, event_name: 'push' }), constrained),
-    /matches an entry but not its claim constraints/,
+    /matches an allow entry but not its claim constraints/,
   );
   await assert.rejects(
     verifyOidcToken(mint(GITHUB_ISSUER, { ...pr, job_workflow_ref: 'owner/repo/.github/workflows/evil.yml@refs/heads/x' }), constrained),
@@ -77,4 +77,20 @@ test('claim constraints narrow an entry to matching refs, events and workflows',
   // A constrained claim missing from the token never matches
   await assert.rejects(verifyOidcToken(mint(GITLAB_ISSUER, { project_path: 'group/p' }), constrained), /claim constraints/);
   assert.ok(await verifyOidcToken(mint(GITLAB_ISSUER, { project_path: 'group/p', pipeline_source: 'merge_request_event' }), constrained));
+});
+
+test('rejections carry a public reason without configuration details', async () => {
+  const { OidcError } = await import('../src/oidc');
+  const wrongAud = mint(GITHUB_ISSUER, { repository: 'owner/repo' });
+  await assert.rejects(verifyOidcToken(wrongAud, { ...opts(['owner/*']), audience: 'private-aud' }), (err: unknown) => {
+    assert.ok(err instanceof OidcError);
+    assert.equal(err.publicReason, 'Audience mismatch');
+    assert.match(err.message, /expected private-aud/);
+    return true;
+  });
+  await assert.rejects(verifyOidcToken(mint(GITHUB_ISSUER, { repository: 'x/y' }), opts(['owner/*'])), (err: unknown) => {
+    assert.ok(err instanceof OidcError);
+    assert.equal(err.publicReason, 'Repository not allowlisted');
+    return true;
+  });
 });

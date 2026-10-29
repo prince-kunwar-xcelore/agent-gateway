@@ -11,7 +11,8 @@ function tokenUrl(proxyUrl: string, agent: Agent): string {
 
 async function readTokenResponse(res: Response, url: string): Promise<string> {
   const body = (await res.text()).trim();
-  if (!res.ok) throw new Error(`Proxy returned HTTP ${res.status} from ${url}: ${body}`);
+  // Error bodies are short JSON from the proxy; cap them in case something else (a tunnel error page) answered
+  if (!res.ok) throw new Error(`Proxy returned HTTP ${res.status} from ${url}: ${body.slice(0, 500)}`);
   return body;
 }
 
