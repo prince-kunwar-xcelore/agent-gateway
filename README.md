@@ -11,7 +11,7 @@ Built as a companion to [pr-audit](https://github.com/prince-kunwar-xcelore/pr-a
 ```
 YOUR LOCAL MACHINE                      GITHUB ACTIONS RUNNER
 ──────────────────────────────          ──────────────────────────────────────
-agent-gateway service (serve)           pr-audit --engine <agent>-cli --auth-token "..."
+agent-gateway service (serve)           pr-audit --engine <agent>-cli --auth-token-file …
   reads ~/.claude/.credentials.json       clones agent-gateway
     and ~/.codex/auth.json                runs: agent-gateway decrypt-token --agent <agent>
   serves /token?agent=claude|codex          authenticates (private key or OIDC, see below)
@@ -189,7 +189,8 @@ Pick a template from `examples/` and copy it into your repo. Set `REVIEW_AGENT` 
 | `examples/mr-review-bun.yml` | Bun (GitLab) | ~1s | None |
 | `examples/mr-review-node.yml` | Node 20 (GitLab) | ~30s | `pnpm build` (tsup) |
 
-`decrypt-token` prints the credentials to stdout, so it's passed straight to `pr-audit --auth-token`:
+`decrypt-token` prints the credentials to stdout. The templates write them to a 0600 file, mask them, and
+pass the file to `pr-audit --auth-token-file`, so they never appear on a command line or in the log:
 
 ```yaml
 env:
@@ -203,16 +204,34 @@ jobs:
       checks: write      # pr-audit's neutral "AI review" check when the usage limit is hit
     steps:
       # … checkout + install agent-gateway, pr-audit and the agent CLI (see the templates)
-      - name: Run PR Review
+      - name: Fetch agent credentials
         env:
           AGENT_GATEWAY_URL: ${{ secrets.AGENT_GATEWAY_URL }}
           AGENT_GATEWAY_PRIVATE_KEY: ${{ secrets.AGENT_GATEWAY_PRIVATE_KEY }}  # optional fallback
+        run: |
+          set -euo pipefail
+          umask 077
+          bun _agent-gateway/src/index.ts decrypt-token --agent "$REVIEW_AGENT" > "$RUNNER_TEMP/agent-auth"
+          # mask every line and every JSON string value
+          { cat "$RUNNER_TEMP/agent-auth"; echo; jq -r '.. | strings' "$RUNNER_TEMP/agent-auth" 2>/dev/null || true; } |
+            while IFS= read -r secret; do
+              if [ "${#secret}" -ge 8 ]; then echo "::add-mask::$secret"; fi
+            done
+      - name: Run PR Review
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           bun _pr-audit/src/index.ts "$PR_URL" --engine "$REVIEW_AGENT-cli" \
-            --auth-token "$(bun _agent-gateway/src/index.ts decrypt-token --agent "$REVIEW_AGENT")"
+            --auth-token-file "$RUNNER_TEMP/agent-auth"
+      - name: Remove agent credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/agent-auth"
 ```
+
+If `decrypt-token` fails, the job stops at that step with its error instead of reviewing without
+credentials. The GitLab templates write the file to `/tmp/agent-auth-$CI_JOB_ID` and delete it in
+`after_script` (GitLab can't mask values created at runtime).
 
 `decrypt-token` tries the allowlist (OIDC) first and only uses `AGENT_GATEWAY_PRIVATE_KEY` if OIDC isn't
 available or is refused; leave the secret unset for allowlist-only setups. When the agent's usage limit is
