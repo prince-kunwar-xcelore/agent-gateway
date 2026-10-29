@@ -1,7 +1,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { encryptToken } from './crypto';
-import { getState, getStates } from './daemon';
+import { ensureFresh, getState, getStates } from './daemon';
 import { verifyOidcToken, repoFromClaims, type OidcOptions } from './oidc';
 import type { Agent } from './token-reader';
 
@@ -35,7 +35,10 @@ export function createServer(opts: ServerOptions): http.Server {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
     if (url.pathname === '/token' && req.method === 'GET') {
-      handleKeyToken(url, res, opts);
+      handleKeyToken(url, res, opts).catch((err: unknown) => {
+        console.error(`[server] GET /token failed: ${err instanceof Error ? err.message : String(err)}`);
+        if (!res.headersSent) sendJson(res, 500, { error: 'Internal error' });
+      });
     } else if (url.pathname === '/token' && req.method === 'POST') {
       handleOidcToken(url, req, res, opts).catch((err: unknown) => {
         console.error(`[server] POST /token failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -74,7 +77,7 @@ function resolveAgent(url: URL, res: http.ServerResponse, opts: ServerOptions): 
   return agent;
 }
 
-function handleKeyToken(url: URL, res: http.ServerResponse, opts: ServerOptions): void {
+async function handleKeyToken(url: URL, res: http.ServerResponse, opts: ServerOptions): Promise<void> {
   if (!opts.keyMode) {
     sendJson(res, 403, { error: 'Private-key mode is disabled on this proxy; use POST /token with an OIDC token' });
     return;
@@ -82,6 +85,7 @@ function handleKeyToken(url: URL, res: http.ServerResponse, opts: ServerOptions)
   const agent = resolveAgent(url, res, opts);
   if (!agent) return;
 
+  await ensureFresh(agent);
   const state = getState(agent);
   if (!state?.encryptedToken) {
     sendJson(res, 503, { error: 'Token not available', detail: state?.lastError ?? null });
@@ -156,6 +160,7 @@ async function handleOidcToken(
     return;
   }
 
+  await ensureFresh(agent);
   const state = getState(agent);
   if (!state?.credentials) {
     sendJson(res, 503, { error: 'Token not available', detail: state?.lastError ?? null });
