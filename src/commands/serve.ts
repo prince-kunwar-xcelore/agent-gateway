@@ -12,7 +12,14 @@ export function runServe(args: string[]): void {
     process.exit(1);
   }
 
-  const { config, source } = resolveServeConfig(args);
+  let resolved: ReturnType<typeof resolveServeConfig>;
+  try {
+    resolved = resolveServeConfig(args);
+  } catch (err) {
+    console.error(`[startup] ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+  const { config, source } = resolved;
 
   const errors = validateConfig(config);
   if (errors.length) {
