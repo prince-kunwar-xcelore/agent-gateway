@@ -124,3 +124,43 @@ export async function readToken(): Promise<string> {
     'Make sure Claude Code is installed and you are logged in.'
   );
 }
+
+/** Access-token expiry in ms since the epoch, or null when unknown (API keys, legacy formats). */
+export function credentialsExpiry(agent: Agent, raw: string): number | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (agent === 'claude') {
+      const expiresAt = parsed?.claudeAiOauth?.expiresAt;
+      return typeof expiresAt === 'number' ? expiresAt : null;
+    }
+    const jwt = parsed?.tokens?.access_token;
+    if (typeof jwt !== 'string') return null;
+    const { exp } = JSON.parse(Buffer.from(jwt.split('.')[1] ?? '', 'base64url').toString('utf8')) as { exp?: unknown };
+    return typeof exp === 'number' ? exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Copy of the credentials that CI can use but not refresh. Both providers
+ * rotate refresh tokens on use, so a CI refresh would log out the local CLI.
+ *   Claude: refreshToken is removed (the CLI uses the access token as is;
+ *           also refresh_token in the legacy auth.json format).
+ *   Codex:  refresh_token is blanked (the CLI rejects auth.json without the
+ *           field) and last_refresh set to now so it doesn't try to refresh.
+ */
+export function withoutRefreshToken(agent: Agent, raw: string): string {
+  const parsed = JSON.parse(raw);
+  if (agent === 'claude') {
+    const oauth = parsed?.claudeAiOauth ?? parsed;
+    delete oauth.refreshToken;
+    delete oauth.refreshTokenExpiresAt;
+    delete oauth.refresh_token;
+  } else {
+    if (!parsed?.tokens) return raw;
+    parsed.tokens.refresh_token = '';
+    parsed.last_refresh = new Date().toISOString();
+  }
+  return JSON.stringify(parsed);
+}
