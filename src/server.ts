@@ -2,7 +2,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { encryptToken } from './crypto';
 import { ensureFresh, getState, getStates } from './daemon';
-import { verifyOidcToken, repoFromClaims, type OidcOptions } from './oidc';
+import { OidcError, verifyOidcToken, repoFromClaims, type OidcOptions } from './oidc';
 import type { Agent } from './token-reader';
 
 export interface ServerOptions {
@@ -62,18 +62,12 @@ export function createServer(opts: ServerOptions): http.Server {
 
 /**
  * The part of an OIDC rejection that is safe to return to an unauthenticated
- * caller: which check failed, without configuration details (expected
- * audience, trusted issuers, key ids). The full reason is logged.
+ * caller: which check failed, without configuration details. Anything that
+ * isn't a token rejection (e.g. a JWKS fetch error naming an internal URL)
+ * stays generic. The full reason is logged.
  */
-const PUBLIC_OIDC_REASONS = [
-  'Malformed JWT', 'Unsupported JWT alg', 'JWT header has no kid', 'JWT payload has no issuer', 'Untrusted issuer',
-  'No JWKS key matches kid', 'Invalid JWT signature', 'Token expired', 'Token not yet valid', 'Audience mismatch',
-  'Repository not allowlisted',
-];
-export const publicOidcReason = (reason: string): string =>
-  reason.endsWith('not its claim constraints')
-    ? 'Repository matches an allow entry but not its claim constraints'
-    : PUBLIC_OIDC_REASONS.find((r) => reason.startsWith(r)) ?? 'Token could not be verified';
+export const publicOidcReason = (err: unknown): string =>
+  err instanceof OidcError ? err.publicReason : 'Token could not be verified';
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -156,7 +150,7 @@ async function handleOidcToken(
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     console.warn(`[server] OIDC rejected (${agent}): ${reason}`);
-    sendJson(res, 403, { error: 'OIDC verification failed', detail: publicOidcReason(reason) });
+    sendJson(res, 403, { error: 'OIDC verification failed', detail: publicOidcReason(err) });
     return;
   }
 
