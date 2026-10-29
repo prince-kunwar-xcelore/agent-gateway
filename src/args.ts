@@ -21,7 +21,7 @@ const isFlag = (arg: string): boolean => arg.startsWith('-') && arg.length > 1;
 
 /**
  * Reject unknown flags and value flags without a value, and return the
- * positional arguments. A value starting with `--` counts as missing, so
+ * positional arguments. A value that looks like a flag counts as missing, so
  * `--allow --port 7432` fails instead of treating `--port` as an allow entry.
  */
 export function parseCommandArgs(command: string, args: string[]): string[] {
@@ -35,7 +35,7 @@ export function parseCommandArgs(command: string, args: string[]): string[] {
     if (!isFlag(arg)) { positionals.push(arg); continue; }
     if (values.has(arg)) {
       const value = args[i + 1];
-      if (value === undefined || value.startsWith('--')) throw new Error(`${arg} needs a value`);
+      if (value === undefined || isFlag(value)) throw new Error(`${arg} needs a value`);
       i++;
     } else if (!booleans.has(arg)) {
       throw new Error(`Unknown option "${arg}" for "${command}". Run with --help for usage.`);
@@ -48,7 +48,7 @@ export function getArg(args: string[], flag: string, defaultValue?: string): str
   const idx = args.indexOf(flag);
   if (idx === -1) return defaultValue;
   const value = args[idx + 1];
-  if (value === undefined || value.startsWith('--')) throw new Error(`${flag} needs a value`);
+  if (value === undefined || isFlag(value)) throw new Error(`${flag} needs a value`);
   return value;
 }
 
@@ -62,7 +62,7 @@ export function getArgs(args: string[], flag: string, split = true): string[] {
   args.forEach((arg, idx) => {
     if (arg !== flag) return;
     const value = args[idx + 1];
-    if (value === undefined || value.startsWith('--')) throw new Error(`${flag} needs a value`);
+    if (value === undefined || isFlag(value)) throw new Error(`${flag} needs a value`);
     values.push(...(split ? value.split(',') : [value]));
   });
   return values.map((v) => v.trim()).filter(Boolean);

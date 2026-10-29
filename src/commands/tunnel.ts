@@ -154,8 +154,9 @@ export async function checkPublicHealth(
   local: Health | null,
   attempts = 10,
   delayMs = 2000,
-): Promise<PublicHealth> {
+): Promise<{ reach: PublicHealth; status: number | null }> {
   let result: PublicHealth = 'unreachable';
+  let status: number | null = null;
   for (let i = 0; i < attempts; i++) {
     if (i) await new Promise((r) => setTimeout(r, delayMs));
     let res: Response;
@@ -164,16 +165,17 @@ export async function checkPublicHealth(
     } catch { continue; /* not up yet */ }
     // Cloudflare answers 5xx (e.g. 530) while the tunnel is still connecting
     if (res.status >= 500) continue;
+    status = res.status;
     const remote = (await res.json().catch(() => null)) as Health | null;
     if (!local?.instance_id) {
-      if (remote?.instance_id || remote?.modes) return 'reachable';
+      if (remote?.instance_id || remote?.modes) return { reach: 'reachable', status };
       result = 'other';
       continue;
     }
-    if (remote?.instance_id === local.instance_id) return 'this-proxy';
+    if (remote?.instance_id === local.instance_id) return { reach: 'this-proxy', status };
     result = 'other';
   }
-  return result;
+  return { reach: result, status };
 }
 
 /**
@@ -199,8 +201,10 @@ export async function installTunnel(
     await verify();
   } catch (err) {
     try { manager.uninstall(setup.spec); } catch { /* best effort */ }
+    // The previous tunnel's unit was overwritten by the install, so it can't be restored
+    const replaced = config.tunnel ? ` It replaced the previous tunnel (${config.tunnel.hostname}), which is gone too: run setup for it again if you need it.` : '';
     if (config.tunnel) { delete config.tunnel; saveConfig(file, config); }
-    throw new Error(`${err instanceof Error ? err.message : String(err)}\n[tunnel] Rolled back: the tunnel service was removed.`);
+    throw new Error(`${err instanceof Error ? err.message : String(err)}\n[tunnel] Rolled back: the tunnel service was removed.${replaced}`);
   }
   config.tunnel = entry;
   saveConfig(file, config);
@@ -225,10 +229,10 @@ export async function runTunnel(args: string[]): Promise<void> {
       await installTunnel(manager, result, entry, file, config, async () => {
         console.log(`[tunnel] Installed and started ${manager.unitPath(result.spec)}; checking ${url}/health…`);
         const local = await fetchHealth(config.port);
-        const reach = await checkPublicHealth(result.hostname, local);
+        const { reach, status } = await checkPublicHealth(result.hostname, local);
         if (reach === 'other') {
           throw new Error(
-            `${url}/health is answered by something other than this proxy.` +
+            `${url}/health is answered by something other than this proxy (HTTP ${status}).` +
             (result.dnsPreexisting
               ? ` The existing DNS record for ${result.hostname} probably points at another tunnel: delete it in the Cloudflare dashboard (or use another --hostname) and run setup again.`
               : ' Check where the hostname points.'),
@@ -236,7 +240,7 @@ export async function runTunnel(args: string[]): Promise<void> {
         }
         console.log(`[tunnel] ${
           reach === 'this-proxy' ? `${url}/health reaches this proxy.`
-          : reach === 'reachable' ? `${url}/health is reachable (start the proxy service to confirm it is this one).`
+          : reach === 'reachable' ? `${url}/health answers, but the proxy isn't running locally to confirm it is this one${result.dnsPreexisting ? ' — the DNS record existed before, so check "tunnel status" once the proxy runs' : ''}.`
           : `${url}/health is not reachable yet — check "tunnel status" and that the proxy is running.`
         }`);
       });
@@ -260,7 +264,7 @@ export async function runTunnel(args: string[]): Promise<void> {
       console.log(`agent-gateway-tunnel (${manager.unitPath(stub)})`);
       console.log(`  service:    ${state.installed ? state.detail : 'not installed'}`);
       if (config?.tunnel) {
-        const reach = await checkPublicHealth(config.tunnel.hostname, await fetchHealth(config.port), 1);
+        const { reach } = await checkPublicHealth(config.tunnel.hostname, await fetchHealth(config.port), 1);
         console.log(`  provider:   ${config.tunnel.provider}${config.tunnel.tunnelName ? ` (tunnel "${config.tunnel.tunnelName}")` : ''}`);
         console.log(`  public URL: https://${config.tunnel.hostname}`);
         console.log(`  health:     ${{ 'this-proxy': 'reaches this proxy', reachable: 'reachable', other: 'ANSWERED BY SOMETHING ELSE', unreachable: 'UNREACHABLE' }[reach]}`);

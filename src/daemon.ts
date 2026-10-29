@@ -28,7 +28,8 @@ const LOCAL_REFRESH_AHEAD_MS: Record<Agent, number> = { claude: 10 * 60 * 1000, 
 const LOCAL_REFRESH_MIN_INTERVAL_MS = 4 * 60 * 1000;
 const LOCAL_REFRESH_TIMEOUT_MS = 2 * 60 * 1000;
 const LOCAL_REFRESH_COMMANDS: Record<Agent, string[]> = {
-  claude: ['claude', '-p', 'Reply with OK'],
+  // No tools and no saved session: the run exists only to make the CLI refresh its login
+  claude: ['claude', '-p', 'Reply with OK', '--tools', '', '--no-session-persistence'],
   codex:  ['codex', 'exec', '--skip-git-repo-check', '--sandbox', 'read-only', 'Reply with OK'],
 };
 
@@ -112,14 +113,18 @@ export async function refresh(agent: Agent, publicKeyPem: string | null): Promis
   try {
     let raw = await readCredentials(agent);
     let expiresAt = credentialsExpiry(agent, raw);
+    state.expiresAt = expiresAt === null ? null : new Date(expiresAt);
     if (expiresAt !== null && expiresAt - Date.now() < LOCAL_REFRESH_AHEAD_MS[agent]) {
       await runLocalRefresh(agent);
       raw = await readCredentials(agent);
       expiresAt = credentialsExpiry(agent, raw);
+      state.expiresAt = expiresAt === null ? null : new Date(expiresAt);
     }
-    state.expiresAt = expiresAt === null ? null : new Date(expiresAt);
     if (expiresAt !== null && expiresAt - Date.now() < MIN_SERVE_VALIDITY_MS) {
-      const local = state.lastLocalRefresh?.error ? ` Local refresh failed: ${state.lastLocalRefresh.error}.` : '';
+      const last = state.lastLocalRefresh;
+      const local = !last ? ''
+        : last.error ? ` Local refresh failed: ${last.error}.`
+        : ` Local refresh last ran at ${last.at.toISOString()} without renewing it (retried every ${LOCAL_REFRESH_MIN_INTERVAL_MS / 60000} min).`;
       throw new ExpiredError(
         `${agent} access token ${expiresAt <= Date.now() ? 'expired' : 'expires'} at ${new Date(expiresAt).toISOString()} and was not refreshed.${local} ` +
         `Run ${agent} on this machine (log in again if asked).`,

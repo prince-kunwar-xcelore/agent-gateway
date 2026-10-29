@@ -67,16 +67,16 @@ test('checkPublicHealth tells this proxy from another one', async () => {
   const local = { ok: true, instance_id: 'abc', modes: { private_key: false, allowlist: true }, agents: {} };
   try {
     respond(200, { ...local });
-    assert.equal(await checkPublicHealth('gw.example.com', local, 1, 0), 'this-proxy');
+    assert.equal((await checkPublicHealth('gw.example.com', local, 1, 0)).reach, 'this-proxy');
     respond(200, { ...local, instance_id: 'other' });
-    assert.equal(await checkPublicHealth('gw.example.com', local, 2, 0), 'other');
+    assert.equal((await checkPublicHealth('gw.example.com', local, 2, 0)).reach, 'other');
     respond(404, '<html>');
-    assert.equal(await checkPublicHealth('gw.example.com', local, 1, 0), 'other');
+    assert.deepEqual(await checkPublicHealth('gw.example.com', local, 1, 0), { reach: 'other', status: 404 });
     respond(530, 'tunnel not connected');
-    assert.equal(await checkPublicHealth('gw.example.com', local, 2, 0), 'unreachable');
+    assert.equal((await checkPublicHealth('gw.example.com', local, 2, 0)).reach, 'unreachable');
     // Local proxy not running: can only say whether some gateway answers
     respond(200, { ...local, instance_id: 'zzz' });
-    assert.equal(await checkPublicHealth('gw.example.com', null, 1, 0), 'reachable');
+    assert.equal((await checkPublicHealth('gw.example.com', null, 1, 0)).reach, 'reachable');
   } finally {
     globalThis.fetch = realFetch;
   }

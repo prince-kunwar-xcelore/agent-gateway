@@ -6,6 +6,7 @@ test('value flags need a value that is not another flag', () => {
   assert.throws(() => getArgs(['--allow', '--port', '7432'], '--allow'), /--allow needs a value/);
   assert.throws(() => getArgs(['--allow'], '--allow'), /--allow needs a value/);
   assert.throws(() => getArg(['--port'], '--port'), /--port needs a value/);
+  assert.throws(() => getArg(['--agent', '-x'], '--agent'), /--agent needs a value/);
   assert.deepEqual(getArgs(['--allow', 'a/*,b/*', '--allow', 'c/d'], '--allow'), ['a/*', 'b/*', 'c/d']);
   assert.equal(getArg([], '--port', '1'), '1');
 });
