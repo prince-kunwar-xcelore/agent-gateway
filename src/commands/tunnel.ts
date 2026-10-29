@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getArg } from '../args';
+import { getArg, parseHostname } from '../args';
 import { configPath, requireConfig, saveConfig, GATEWAY_DIR, type GatewayConfig } from '../config';
 import { lingerHint, serviceManager, which, type ServiceSpec } from '../service';
 
@@ -30,8 +30,9 @@ function requireBin(bin: string, install: string): string {
 // ── Cloudflare ───────────────────────────────────────────────────────────────
 
 function setupCloudflare(args: string[], config: GatewayConfig): { spec: ServiceSpec; hostname: string; tunnelName: string } {
-  const hostname = getArg(args, '--hostname');
-  if (!hostname) throw new Error('Usage: tunnel setup cloudflare --hostname <sub.your-domain.com> [--name <tunnel>]');
+  const hostnameArg = getArg(args, '--hostname');
+  if (!hostnameArg) throw new Error('Usage: tunnel setup cloudflare --hostname <sub.your-domain.com> [--name <tunnel>]');
+  const hostname = parseHostname('--hostname', hostnameArg);
   const name = getArg(args, '--name', DEFAULT_TUNNEL_NAME)!;
   const cloudflared = requireBin('cloudflared', 'Install it: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/');
 
@@ -102,8 +103,9 @@ ingress:
 // ── ngrok ────────────────────────────────────────────────────────────────────
 
 function setupNgrok(args: string[], config: GatewayConfig): { spec: ServiceSpec; hostname: string } {
-  const domain = getArg(args, '--domain');
-  if (!domain) throw new Error('Usage: tunnel setup ngrok --domain <name.ngrok-free.app>');
+  const domainArg = getArg(args, '--domain');
+  if (!domainArg) throw new Error('Usage: tunnel setup ngrok --domain <name.ngrok-free.app>');
+  const domain = parseHostname('--domain', domainArg);
   const ngrok = requireBin('ngrok', 'Install it: https://ngrok.com/download');
 
   // The service won't see shell env vars, so the authtoken must be in ngrok's config file

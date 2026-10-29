@@ -5,6 +5,7 @@ import { runServe }         from './commands/serve';
 import { runInit, runConfig, runAllow, runMode } from './commands/config';
 import { runService }       from './commands/service';
 import { runTunnel }        from './commands/tunnel';
+import { COMMAND_FLAGS, parseCommandArgs } from './args';
 
 const [subcommand, ...args] = process.argv.slice(2);
 
@@ -70,6 +71,10 @@ All commands accept --config <path>.
 `;
 
 async function main(): Promise<void> {
+  // `<subcommand> --help` shows the usage instead of failing as an unknown option
+  if (args.includes('--help') || args.includes('-h')) { console.log(HELP); return; }
+  if (subcommand && subcommand in COMMAND_FLAGS) parseCommandArgs(subcommand, args);
+
   switch (subcommand) {
     case 'generate-keys': runGenerateKeys(args); break;
     case 'decrypt-token': await runDecryptToken(args); break;

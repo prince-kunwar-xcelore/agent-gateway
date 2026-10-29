@@ -143,6 +143,7 @@ export async function runService(args: string[]): Promise<void> {
     }
 
     case 'uninstall':
+      if (!manager.state(stub).installed) throw new Error(`Service is not installed (${manager.unitPath(stub)}).`);
       manager.uninstall(stub);
       console.log(`[service] Uninstalled ${manager.unitPath(stub)}`);
       break;
@@ -150,16 +151,16 @@ export async function runService(args: string[]): Promise<void> {
     case 'start':
     case 'stop':
     case 'restart': {
-      if (!manager.state(stub).installed) throw new Error('Service is not installed. Run "service install".');
+      const state = manager.state(stub);
+      if (!state.installed) throw new Error('Service is not installed. Run "service install".');
       if (action !== 'stop') {
         // A broken config would just crash-loop the service
         const config = requireConfig(file);
         const errors = validateConfig(config);
         if (errors.length) throw new Error(`Config is invalid:\n  ${errors.join('\n  ')}`);
-      }
-      if (action !== 'stop' && !manager.state(stub).active) {
-        const { port } = requireConfig(file);
-        if (await portInUse(port)) throw new Error(`Port ${port} is already in use (a manually started proxy?). Stop it first.`);
+        if (!state.active && (await portInUse(config.port))) {
+          throw new Error(`Port ${config.port} is already in use (a manually started proxy?). Stop it first.`);
+        }
       }
       manager[action](stub);
       console.log(`[service] ${action === 'stop' ? 'Stopped' : action === 'start' ? 'Started' : 'Restarted'}.`);
@@ -168,6 +169,7 @@ export async function runService(args: string[]): Promise<void> {
 
     case 'enable':
     case 'disable': {
+      if (!manager.state(stub).installed) throw new Error('Service is not installed. Run "service install".');
       manager[action](stub);
       console.log(`[service] ${action === 'enable' ? 'Will' : 'Will not'} start on boot.`);
       const hint = action === 'enable' ? lingerHint() : null;
