@@ -199,17 +199,23 @@ export async function installTunnel(
   const previousUnit = readUnit();
   const wasActive = manager.state(stub).active;
   if (wasActive) manager.stop(stub);
+  let installed = false;
   try {
     manager.install(setup.spec);
+    installed = true;
     manager.enable(setup.spec);
     manager.start(setup.spec);
     await verify();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // Install failed before writing the unit: the previous tunnel is intact, so bring it back
-    if (previousUnit !== null && readUnit() === previousUnit) {
+    if (!installed && previousUnit !== null && readUnit() === previousUnit) {
       if (wasActive) try { manager.start(stub); } catch { /* reported by "tunnel status" */ }
       throw new Error(`${message}\n[tunnel] Nothing was changed; the previous tunnel service was ${wasActive ? 'restarted' : 'left as it was'}.`);
+    }
+    // Re-run with an identical unit: it's the existing tunnel that failed, so leave it (and its config entry) for "tunnel status" / "service logs"
+    if (installed && previousUnit !== null && readUnit() === previousUnit) {
+      throw new Error(`${message}\n[tunnel] The existing tunnel service (unchanged) is installed and enabled but failed; check "tunnel status".`);
     }
     try { manager.uninstall(setup.spec); } catch { /* best effort */ }
     // The previous tunnel's unit was overwritten by the install, so it can't be restored

@@ -96,3 +96,17 @@ test('installTunnel keeps the previous tunnel when install fails before replacin
   assert.deepEqual(manager.calls, ['stop', 'install', 'start']);
   assert.equal(loadConfig(file)!.tunnel?.hostname, 'old.ngrok-free.app');
 });
+
+test('installTunnel leaves an identical re-installed unit in place when it then fails', async () => {
+  const { file, config } = tmpConfigFile(true);
+  const unit = path.join(path.dirname(file), 'tunnel.service');
+  fs.writeFileSync(unit, 'same unit');
+  const manager = fakeManager('start');
+  manager.unitPath = () => unit;
+  await assert.rejects(
+    installTunnel(manager, { spec, hostname: entry.hostname }, entry, file, config, async () => {}),
+    /existing tunnel service \(unchanged\) is installed and enabled but failed/,
+  );
+  assert.deepEqual(manager.calls, ['install', 'enable', 'start']);
+  assert.equal(loadConfig(file)!.tunnel?.hostname, 'old.ngrok-free.app');
+});
