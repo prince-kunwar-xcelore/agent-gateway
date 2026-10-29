@@ -73,3 +73,11 @@ test('globMatches treats only * as special', async () => {
   assert.ok(!globMatches('refs/heads/mainX', 'refs/heads/main'));
   assert.ok(!globMatches('aXb', 'a.b'));
 });
+
+test('numeric self-hosted groups need the slash form, which round-trips', () => {
+  assert.throws(() => parseAllowEntry('gitlab@https://git.example.com:123/*'), /looks like a port/);
+  const numeric = parseAllowEntry('gitlab@https://git.example.com/:123/*');
+  assert.equal(numeric.issuer, 'https://git.example.com');
+  assert.equal(numeric.pattern, '123/*');
+  assert.equal(parseAllowEntry(numeric.raw).raw, numeric.raw);
+});

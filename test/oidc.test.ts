@@ -94,3 +94,12 @@ test('rejections carry a public reason without configuration details', async () 
     return true;
   });
 });
+
+test('a token whose payload is not base64url JSON is a Malformed JWT', async () => {
+  const { OidcError } = await import('../src/oidc');
+  await assert.rejects(verifyOidcToken('eyJhbGciOiJSUzI1NiJ9.!!!.sig', opts(['owner/*'])), (err: unknown) => {
+    assert.ok(err instanceof OidcError);
+    assert.equal(err.publicReason, 'Malformed JWT');
+    return true;
+  });
+});

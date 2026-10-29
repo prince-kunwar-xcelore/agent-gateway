@@ -80,8 +80,12 @@ export function parseAllowEntry(entry: string): AllowEntry {
       throw new Error(`Invalid allow entry "${entry}": issuer URL must not have credentials, a query or a fragment`);
     }
     // `gitlab@https://host:8443/*` (pattern forgotten) would otherwise trust https://host for group "8443"
-    if (/^\d+(\/|$)/.test(rest.slice(idx + 1))) {
-      throw new Error(`Invalid allow entry "${entry}": "${rest.slice(idx + 1)}" looks like a port. Use gitlab@https://host:port:group/*`);
+    // A slash before the colon (gitlab@https://host/:123/*) makes a numeric group unambiguous
+    if (/^\d+(\/|$)/.test(rest.slice(idx + 1)) && !rest.slice(0, idx).endsWith('/')) {
+      throw new Error(
+        `Invalid allow entry "${entry}": "${rest.slice(idx + 1)}" looks like a port. ` +
+        'Use gitlab@https://host:port:group/*, or gitlab@https://host/:group/* for a numeric group',
+      );
     }
     // Normalise (lower-case host, default port dropped, no trailing slash) so it compares
     // equal to the token's `iss`
@@ -99,7 +103,9 @@ export function parseAllowEntry(entry: string): AllowEntry {
   }
 
   pattern = validatePattern(pattern, platform, entry);
-  const prefix = platform === 'github' ? 'github' : issuer === GITLAB_ISSUER ? 'gitlab' : `gitlab@${issuer}`;
+  // Keep the slash before a numeric group so the canonical form re-parses the same way
+  const selfHosted = `gitlab@${issuer}${/^\d/.test(pattern) ? '/' : ''}`;
+  const prefix = platform === 'github' ? 'github' : issuer === GITLAB_ISSUER ? 'gitlab' : selfHosted;
   return { raw: `${prefix}:${pattern}`, platform, issuer, pattern };
 }
 

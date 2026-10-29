@@ -144,7 +144,12 @@ export async function runService(args: string[]): Promise<void> {
     }
 
     case 'uninstall':
-      if (!manager.state(stub).installed) throw new Error(`Service is not installed (${manager.unitPath(stub)}).`);
+      if (!manager.state(stub).installed) {
+        // Idempotent for cleanup scripts; a unit file left behind is still removed
+        manager.uninstall(stub);
+        console.log(`[service] Not installed (${manager.unitPath(stub)}); nothing to do.`);
+        break;
+      }
       manager.uninstall(stub);
       console.log(`[service] Uninstalled ${manager.unitPath(stub)}`);
       break;

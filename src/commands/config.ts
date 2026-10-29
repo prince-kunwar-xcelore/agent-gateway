@@ -17,12 +17,20 @@ function printConfig(file: string, config: GatewayConfig): void {
 /** Resolve a --public-key path and check it is the RSA-4096 public key the encryption layout expects. */
 function checkPublicKey(file: string): string {
   const abs = path.resolve(file);
+  let pem: string;
+  try {
+    pem = fs.readFileSync(abs, 'utf8');
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    throw new Error(code === 'ENOENT'
+      ? `Public key not found: ${abs}. Create one with "generate-keys".`
+      : `Could not read public key ${abs}: ${code ?? (err as Error).message}`);
+  }
   let key: crypto.KeyObject;
   try {
-    key = crypto.createPublicKey(fs.readFileSync(abs, 'utf8'));
-  } catch (err) {
-    const missing = (err as NodeJS.ErrnoException).code === 'ENOENT';
-    throw new Error(`${missing ? 'Public key not found' : 'Not a PEM public key'}: ${abs}. Create one with "generate-keys".`);
+    key = crypto.createPublicKey(pem);
+  } catch {
+    throw new Error(`Not a PEM public key: ${abs}. Create one with "generate-keys".`);
   }
   if (key.asymmetricKeyType !== 'rsa' || key.asymmetricKeyDetails?.modulusLength !== 4096) {
     throw new Error(`${abs} is not an RSA-4096 public key. Create one with "generate-keys".`);
@@ -117,7 +125,7 @@ export function runAllow(args: string[]): void {
     }
     config.allowlist.allow = [...currentRaw, ...added];
     if (added.length) console.log(`[allow] Added: ${added.join(', ')}`);
-    if (required.length) console.log(`[allow] Constraints for ${changed.map((e) => e.raw).join(', ')}: ${formatConstraints(constraints[changed[0].raw])}`);
+    if (required.length) for (const e of changed) console.log(`[allow] Constraints for ${e.raw}: ${formatConstraints(constraints[e.raw])}`);
   } else {
     const removed = changed.filter((e) => currentRaw.has(e.raw)).map((e) => e.raw);
     const missing = changed.filter((e) => !currentRaw.has(e.raw)).map((e) => e.raw);

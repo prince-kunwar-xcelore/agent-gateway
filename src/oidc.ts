@@ -87,13 +87,20 @@ export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<O
   if (parts.length !== 3) throw new OidcError('Malformed JWT');
   const [headerB64, payloadB64, signatureB64] = parts;
 
-  const header = b64urlJson<{ alg: string; kid?: string }>(headerB64);
+  let header: { alg: string; kid?: string };
+  let unverified: OidcClaims;
+  try {
+    header = b64urlJson(headerB64);
+    unverified = b64urlJson(payloadB64);
+  } catch {
+    throw new OidcError('Malformed JWT', 'header or payload is not base64url JSON');
+  }
+  if (!header || typeof header !== 'object') throw new OidcError('Malformed JWT');
   if (header.alg !== 'RS256') throw new OidcError('Unsupported JWT alg', header.alg);
   // Without a kid, find() would match any JWKS entry that also lacks one
   if (!header.kid) throw new OidcError('JWT header has no kid');
 
   // Trust the issuer only after checking it against our list — it selects the JWKS.
-  const unverified = b64urlJson<OidcClaims>(payloadB64);
   if (!unverified || typeof unverified !== 'object' || typeof unverified.iss !== 'string') {
     throw new OidcError('JWT payload has no issuer');
   }

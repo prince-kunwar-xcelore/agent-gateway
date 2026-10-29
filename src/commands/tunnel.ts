@@ -193,18 +193,35 @@ export async function installTunnel(
   verify: () => Promise<void>,
 ): Promise<void> {
   const stub: ServiceSpec = { name: TUNNEL_SERVICE, description: '', command: [] };
-  if (manager.state(stub).active) manager.stop(stub);
+  const readUnit = (): string | null => {
+    try { return fs.readFileSync(manager.unitPath(stub), 'utf8'); } catch { return null; }
+  };
+  const previousUnit = readUnit();
+  const wasActive = manager.state(stub).active;
+  if (wasActive) manager.stop(stub);
+  let installed = false;
   try {
     manager.install(setup.spec);
+    installed = true;
     manager.enable(setup.spec);
     manager.start(setup.spec);
     await verify();
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Install failed before writing the unit: the previous tunnel is intact, so bring it back
+    if (!installed && previousUnit !== null && readUnit() === previousUnit) {
+      if (wasActive) try { manager.start(stub); } catch { /* reported by "tunnel status" */ }
+      throw new Error(`${message}\n[tunnel] Nothing was changed; the previous tunnel service was ${wasActive ? 'restarted' : 'left as it was'}.`);
+    }
+    // Re-run with an identical unit: it's the existing tunnel that failed, so leave it (and its config entry) for "tunnel status" / "service logs"
+    if (installed && previousUnit !== null && readUnit() === previousUnit) {
+      throw new Error(`${message}\n[tunnel] The existing tunnel service (unchanged) is installed and enabled but failed; check "tunnel status".`);
+    }
     try { manager.uninstall(setup.spec); } catch { /* best effort */ }
     // The previous tunnel's unit was overwritten by the install, so it can't be restored
     const replaced = config.tunnel ? ` It replaced the previous tunnel (${config.tunnel.hostname}), which is gone too: run setup for it again if you need it.` : '';
     if (config.tunnel) { delete config.tunnel; saveConfig(file, config); }
-    throw new Error(`${err instanceof Error ? err.message : String(err)}\n[tunnel] Rolled back: the tunnel service was removed.${replaced}`);
+    throw new Error(`${message}\n[tunnel] Rolled back: the tunnel service was removed.${replaced}`);
   }
   config.tunnel = entry;
   saveConfig(file, config);
@@ -228,9 +245,17 @@ export async function runTunnel(args: string[]): Promise<void> {
       const entry: TunnelConfig = { provider, hostname: result.hostname, tunnelName: result.tunnelName };
       await installTunnel(manager, result, entry, file, config, async () => {
         console.log(`[tunnel] Installed and started ${manager.unitPath(result.spec)}; checking ${url}/health…`);
-        const local = await fetchHealth(config.port);
-        const { reach, status } = await checkPublicHealth(result.hostname, local);
+        let local = await fetchHealth(config.port);
+        let { reach, status } = await checkPublicHealth(result.hostname, local);
         if (reach === 'other') {
+          // The proxy may have restarted during the check (new instance_id): compare once more
+          local = await fetchHealth(config.port);
+          ({ reach, status } = await checkPublicHealth(result.hostname, local, 3));
+        }
+        // Only a different instance_id from a running local proxy is proof of a wrong route
+        if (reach === 'other' && !local?.instance_id) {
+          console.warn(`[tunnel] ${url}/health answered HTTP ${status} and the proxy isn't running locally to compare with; check "tunnel status" once it runs.`);
+        } else if (reach === 'other') {
           throw new Error(
             `${url}/health is answered by something other than this proxy (HTTP ${status}).` +
             (result.dnsPreexisting
@@ -275,8 +300,9 @@ export async function runTunnel(args: string[]): Promise<void> {
     case 'remove': {
       // Tolerate a missing config so an orphaned service can still be removed
       const config = loadConfig(file);
-      if (!manager.state(stub).installed && !config?.tunnel) throw new Error('No tunnel service is installed.');
-      manager.uninstall(stub);
+      const installed = manager.state(stub).installed;
+      if (!installed && !config?.tunnel) throw new Error('No tunnel service is installed.');
+      if (installed) manager.uninstall(stub);
       if (config?.tunnel) {
         delete config.tunnel;
         saveConfig(file, config);
