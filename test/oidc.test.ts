@@ -68,7 +68,7 @@ test('claim constraints narrow an entry to matching refs, events and workflows',
   assert.equal((await verifyOidcToken(mint(GITHUB_ISSUER, pr), constrained)).repository, 'owner/repo');
   await assert.rejects(
     verifyOidcToken(mint(GITHUB_ISSUER, { ...pr, event_name: 'push' }), constrained),
-    /matches an entry but not its claim constraints/,
+    /matches an allow entry but not its claim constraints/,
   );
   await assert.rejects(
     verifyOidcToken(mint(GITHUB_ISSUER, { ...pr, job_workflow_ref: 'owner/repo/.github/workflows/evil.yml@refs/heads/x' }), constrained),
