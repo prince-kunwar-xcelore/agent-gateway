@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getArg, getArgs, hasFlag, parseAgents, parseCommandArgs, parsePort } from '../args';
-import { parseAllowList } from '../allowlist';
+import { formatConstraints, parseAllowList, parseConstraints, parseRequireFlags } from '../allowlist';
 import {
   configPath, defaultConfig, loadConfig, requireConfig, saveConfig, validateConfig,
   type GatewayConfig,
@@ -88,37 +88,51 @@ export function runAllow(args: string[]): void {
   const config = requireConfig(file);
 
   if (action === 'list') {
-    if (!config.allowlist.allow.length) console.log('(empty)');
-    for (const entry of config.allowlist.allow) console.log(entry);
+    const entries = parseAllowList(config.allowlist.allow, config.allowlist.constraints);
+    if (!entries.length) console.log('(empty)');
+    for (const e of entries) console.log(e.constraints ? `${e.raw}  (requires ${formatConstraints(e.constraints)})` : e.raw);
     if (!config.allowlist.enabled) console.log('[allow] Note: allowlist mode is disabled ("mode enable allowlist").');
     return;
   }
   if ((action !== 'add' && action !== 'remove') || !patterns.length) {
-    throw new Error('Usage: allow add|remove <entry...> | allow list');
+    throw new Error('Usage: allow add <entry...> [--require claim=pattern ...] | allow remove <entry...> | allow list');
   }
+  const required = getArgs(args, '--require', false);
+  if (required.length && action !== 'add') throw new Error('--require only applies to "allow add"');
 
-  const current = parseAllowList(config.allowlist.allow);
+  const current = parseAllowList(config.allowlist.allow, config.allowlist.constraints);
   const changed = parseAllowList(patterns);
 
   // parseAllowList canonicalises and de-duplicates, so entries compare by `raw`
   const currentRaw = new Set(current.map((e) => e.raw));
+  // Re-key constraints by canonical entry so removals and replacements find them
+  const constraints = Object.fromEntries(current.filter((e) => e.constraints).map((e) => [e.raw, e.constraints!]));
   if (action === 'add') {
     const added = changed.filter((e) => !currentRaw.has(e.raw)).map((e) => e.raw);
-    if (!added.length) { console.log('[allow] Nothing to add (already allowed).'); return; }
+    if (!added.length && !required.length) { console.log('[allow] Nothing to add (already allowed).'); return; }
+    if (required.length) {
+      // Replaces any constraints the entries had; validated against each entry's platform
+      const requested = parseRequireFlags(required);
+      for (const e of changed) constraints[e.raw] = parseConstraints(e, requested);
+    }
     config.allowlist.allow = [...currentRaw, ...added];
-    console.log(`[allow] Added: ${added.join(', ')}`);
+    if (added.length) console.log(`[allow] Added: ${added.join(', ')}`);
+    if (required.length) console.log(`[allow] Constraints for ${changed.map((e) => e.raw).join(', ')}: ${formatConstraints(constraints[changed[0].raw])}`);
   } else {
     const removed = changed.filter((e) => currentRaw.has(e.raw)).map((e) => e.raw);
     const missing = changed.filter((e) => !currentRaw.has(e.raw)).map((e) => e.raw);
     if (missing.length) console.warn(`[allow] Not in allowlist: ${missing.join(', ')}`);
     if (!removed.length) return;
     config.allowlist.allow = [...currentRaw].filter((raw) => !removed.includes(raw));
+    for (const raw of removed) delete constraints[raw];
     console.log(`[allow] Removed: ${removed.join(', ')}`);
     if (config.allowlist.enabled && !config.allowlist.allow.length) {
       console.warn('[allow] Allowlist is now empty — every OIDC request will be rejected.');
     }
   }
 
+  if (Object.keys(constraints).length) config.allowlist.constraints = constraints;
+  else delete config.allowlist.constraints;
   saveValid(file, config);
   if (!config.allowlist.enabled) console.log('[allow] Note: allowlist mode is disabled ("mode enable allowlist").');
   restartIfRunning(args);

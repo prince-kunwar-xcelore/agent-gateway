@@ -11,7 +11,7 @@ export const COMMAND_FLAGS: Record<string, FlagSpec> = {
   serve:           { values: SERVE_VALUES, booleans: [] },
   init:            { values: ['--allow', '--public-key', '--port', '--agents'], booleans: ['--force'] },
   config:          { values: [], booleans: [] },
-  allow:           { values: [], booleans: ['--no-restart'] },
+  allow:           { values: ['--require'], booleans: ['--no-restart'] },
   mode:            { values: ['--public-key'], booleans: ['--no-restart'] },
   service:         { values: [], booleans: ['--force', '-f', '--follow'] },
   tunnel:          { values: ['--hostname', '--name', '--domain'], booleans: [] },
@@ -56,14 +56,14 @@ export function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
 }
 
-/** All values of a repeatable flag; each value may also be comma-separated. */
-export function getArgs(args: string[], flag: string): string[] {
+/** All values of a repeatable flag; each value may also be comma-separated unless `split` is false. */
+export function getArgs(args: string[], flag: string, split = true): string[] {
   const values: string[] = [];
   args.forEach((arg, idx) => {
     if (arg !== flag) return;
     const value = args[idx + 1];
     if (value === undefined || isFlag(value)) throw new Error(`${flag} needs a value`);
-    values.push(...value.split(','));
+    values.push(...(split ? value.split(',') : [value]));
   });
   return values.map((v) => v.trim()).filter(Boolean);
 }
