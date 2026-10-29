@@ -47,8 +47,8 @@ export function defaultConfig(): GatewayConfig {
   };
 }
 
-export function configPath(args: string[]): string {
-  return path.resolve(getArg(args, '--config', DEFAULT_CONFIG_PATH)!);
+export function configPath(args: string[], defaultPath = DEFAULT_CONFIG_PATH): string {
+  return path.resolve(getArg(args, '--config', defaultPath)!);
 }
 
 const isObject = (v: unknown): v is object => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -138,7 +138,7 @@ export function validateConfig(config: GatewayConfig): string[] {
  * moved config can't silently switch auth modes.
  */
 export function resolveServeConfig(args: string[], defaultPath = DEFAULT_CONFIG_PATH): { config: GatewayConfig; source: string | null } {
-  const file = path.resolve(getArg(args, '--config', defaultPath)!);
+  const file = configPath(args, defaultPath);
   const fromFile = loadConfig(file);
   if (!fromFile && args.includes('--config')) throw new Error(`Config file not found: ${file}`);
   const config = fromFile ?? defaultConfig();

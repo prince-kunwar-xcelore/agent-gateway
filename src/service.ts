@@ -91,6 +91,12 @@ export const systemdQuote = (arg: string): string => {
   return /[\s"'\\]/.test(escaped) ? `"${escaped.replace(/(["\\])/g, '\\$1')}"` : escaped;
 };
 
+// WorkingDirectory= takes an unquoted path; only `%` specifiers need escaping
+const systemdPath = (value: string): string => {
+  rejectControlChars(value);
+  return value.replace(/%/g, '%%');
+};
+
 // Environment= expands `%` specifiers (not `$`); quoting keeps spaces in the value
 export const systemdEnv = (name: string, value: string): string => {
   rejectControlChars(value);
@@ -108,7 +114,7 @@ Wants=network-online.target
 
 [Service]
 ExecStart=${spec.command.map(systemdQuote).join(' ')}
-WorkingDirectory=${GATEWAY_DIR.replace(/%/g, '%%')}
+WorkingDirectory=${systemdPath(GATEWAY_DIR)}
 Environment=${systemdEnv('HOME', os.homedir())}
 Environment=${systemdEnv('PATH', servicePath(spec))}
 Restart=on-failure

@@ -71,7 +71,9 @@ async function readCredentialsFromKeychain(): Promise<{ raw: string } | { reason
       }),
     };
   } catch (err) {
-    return { reason: `unavailable (${err instanceof Error ? err.message : String(err)})` };
+    // /health is public: keep native-module errors to their first line
+    const message = (err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 120);
+    return { reason: `unavailable (${message})` };
   }
 }
 

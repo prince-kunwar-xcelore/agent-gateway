@@ -26,7 +26,8 @@ const MIN_SERVE_VALIDITY_MS = 2 * 60 * 1000;
  */
 const LOCAL_REFRESH_AHEAD_MS: Record<Agent, number> = { claude: 10 * 60 * 1000, codex: 24 * 3600 * 1000 };
 const LOCAL_REFRESH_MIN_INTERVAL_MS = 4 * 60 * 1000;
-const LOCAL_REFRESH_TIMEOUT_MS = 2 * 60 * 1000;
+// Shorter than decrypt-token's 60s timeout, since a /token request may wait for it
+const LOCAL_REFRESH_TIMEOUT_MS = 45 * 1000;
 const LOCAL_REFRESH_COMMANDS: Record<Agent, string[]> = {
   // No tools and no saved session: the run exists only to make the CLI refresh its login
   claude: ['claude', '-p', 'Reply with OK', '--tools', '', '--no-session-persistence'],

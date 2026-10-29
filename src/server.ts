@@ -57,6 +57,8 @@ export function createServer(opts: ServerOptions): http.Server {
   });
   // Bound how long a client may take to send its request (e.g. a POST body that never finishes)
   server.requestTimeout = REQUEST_TIMEOUT_MS;
+  // Node's default headersTimeout (60s) would exceed it; it must not
+  server.headersTimeout = Math.min(server.headersTimeout, REQUEST_TIMEOUT_MS);
   return server;
 }
 
