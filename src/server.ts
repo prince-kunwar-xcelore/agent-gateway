@@ -180,11 +180,17 @@ function handleHealth(res: http.ServerResponse, opts: ServerOptions): void {
     const lastRefreshAt = state?.lastRefreshAt ?? null;
     const agentOk = lastRefreshAt !== null && !state?.lastError;
     ok &&= agentOk;
+    const expiresAt = state?.expiresAt ?? null;
     agents[agent] = {
       ok: agentOk,
       age_seconds: lastRefreshAt ? Math.floor((Date.now() - lastRefreshAt.getTime()) / 1000) : null,
       last_refresh: lastRefreshAt?.toISOString() ?? null,
       last_error: state?.lastError ?? null,
+      expires_at: expiresAt?.toISOString() ?? null,
+      expires_in_seconds: expiresAt ? Math.floor((expiresAt.getTime() - Date.now()) / 1000) : null,
+      ...(state?.lastLocalRefresh ? {
+        local_refresh: { at: state.lastLocalRefresh.at.toISOString(), error: state.lastLocalRefresh.error },
+      } : {}),
     };
   }
 

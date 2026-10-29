@@ -1,6 +1,7 @@
 import type { Agent } from './token-reader';
 
-const TIMEOUT_MS = 10_000;
+// The proxy may run the agent CLI to refresh an expiring login before answering
+const TIMEOUT_MS = 60_000;
 
 function tokenUrl(proxyUrl: string, agent: Agent): string {
   const url = new URL('/token', proxyUrl);

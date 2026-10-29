@@ -17,6 +17,8 @@ export interface ServiceSpec {
   description: string;
   /** Absolute command + arguments. */
   command: string[];
+  /** Extra directories for the service's PATH, e.g. where the agent CLIs live. */
+  pathDirs?: string[];
 }
 
 export interface ServiceState {
@@ -71,7 +73,7 @@ export function which(bin: string): string | null {
 
 // Services start with a minimal PATH; include the directories of the binaries we run.
 function servicePath(spec: ServiceSpec): string {
-  const dirs = new Set([path.dirname(spec.command[0]), '/usr/local/bin', '/usr/bin', '/bin']);
+  const dirs = new Set([path.dirname(spec.command[0]), ...(spec.pathDirs ?? []), '/usr/local/bin', '/usr/bin', '/bin']);
   return [...dirs].join(':');
 }
 
