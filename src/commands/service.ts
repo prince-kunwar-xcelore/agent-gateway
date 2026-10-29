@@ -25,10 +25,13 @@ export function resolveEntrypoint(): string[] {
 }
 
 export function proxySpec(file: string): ServiceSpec {
+  // The daemon runs the agent CLIs to refresh their logins; services start with a minimal PATH
+  const agentDirs = ['claude', 'codex'].map(which).filter((p): p is string => p !== null).map((p) => path.dirname(p));
   return {
     name: PROXY_SERVICE,
     description: 'Agent Gateway — serves local agent subscription credentials',
     command: [...resolveEntrypoint(), 'serve', '--config', file],
+    pathDirs: agentDirs,
   };
 }
 
@@ -68,11 +71,12 @@ export function restartIfRunning(args: string[]): void {
   console.log('[service] Restarted agent-gateway to apply the change.');
 }
 
-interface Health {
+export interface Health {
   ok: boolean;
+  instance_id?: string;
   modes: { private_key: boolean; allowlist: boolean };
   warnings?: string[];
-  agents: Record<string, { ok: boolean; age_seconds: number | null; last_error: string | null }>;
+  agents: Record<string, { ok: boolean; age_seconds: number | null; last_error: string | null; expires_in_seconds?: number | null }>;
 }
 
 export async function fetchHealth(port: number): Promise<Health | null> {
@@ -83,6 +87,9 @@ export async function fetchHealth(port: number): Promise<Health | null> {
     return null;
   }
 }
+
+const formatDuration = (seconds: number): string =>
+  seconds <= 0 ? '0m (expired)' : seconds >= 3600 ? `${Math.floor(seconds / 3600)}h${Math.floor((seconds % 3600) / 60)}m` : `${Math.floor(seconds / 60)}m`;
 
 export function printHealth(health: Health | null, config: GatewayConfig): void {
   if (!health) {
@@ -96,7 +103,8 @@ export function printHealth(health: Health | null, config: GatewayConfig): void 
   for (const w of health.warnings ?? []) console.log(`  warning:    ${w}`);
   for (const [agent, s] of Object.entries(health.agents)) {
     const age = s.age_seconds === null ? 'never refreshed' : `refreshed ${s.age_seconds}s ago`;
-    console.log(`  ${agent.padEnd(10)}  ${s.ok ? 'ok' : 'FAIL'}, ${age}${s.last_error ? ` — ${s.last_error}` : ''}`);
+    const expiry = typeof s.expires_in_seconds === 'number' ? `, access token expires in ${formatDuration(s.expires_in_seconds)}` : '';
+    console.log(`  ${agent.padEnd(10)}  ${s.ok ? 'ok' : 'FAIL'}, ${age}${expiry}${s.last_error ? ` — ${s.last_error}` : ''}`);
   }
 }
 
@@ -136,6 +144,7 @@ export async function runService(args: string[]): Promise<void> {
     }
 
     case 'uninstall':
+      if (!manager.state(stub).installed) throw new Error(`Service is not installed (${manager.unitPath(stub)}).`);
       manager.uninstall(stub);
       console.log(`[service] Uninstalled ${manager.unitPath(stub)}`);
       break;
@@ -143,16 +152,16 @@ export async function runService(args: string[]): Promise<void> {
     case 'start':
     case 'stop':
     case 'restart': {
-      if (!manager.state(stub).installed) throw new Error('Service is not installed. Run "service install".');
+      const state = manager.state(stub);
+      if (!state.installed) throw new Error('Service is not installed. Run "service install".');
       if (action !== 'stop') {
         // A broken config would just crash-loop the service
         const config = requireConfig(file);
         const errors = validateConfig(config);
         if (errors.length) throw new Error(`Config is invalid:\n  ${errors.join('\n  ')}`);
-      }
-      if (action !== 'stop' && !manager.state(stub).active) {
-        const { port } = requireConfig(file);
-        if (await portInUse(port)) throw new Error(`Port ${port} is already in use (a manually started proxy?). Stop it first.`);
+        if (!state.active && (await portInUse(config.port))) {
+          throw new Error(`Port ${config.port} is already in use (a manually started proxy?). Stop it first.`);
+        }
       }
       manager[action](stub);
       console.log(`[service] ${action === 'stop' ? 'Stopped' : action === 'start' ? 'Started' : 'Restarted'}.`);
@@ -161,6 +170,7 @@ export async function runService(args: string[]): Promise<void> {
 
     case 'enable':
     case 'disable': {
+      if (!manager.state(stub).installed) throw new Error('Service is not installed. Run "service install".');
       manager[action](stub);
       console.log(`[service] ${action === 'enable' ? 'Will' : 'Will not'} start on boot.`);
       const hint = action === 'enable' ? lingerHint() : null;

@@ -1,6 +1,7 @@
 import type { Agent } from './token-reader';
 
-const TIMEOUT_MS = 10_000;
+// The proxy may run the agent CLI to refresh an expiring login before answering
+const TIMEOUT_MS = 60_000;
 
 function tokenUrl(proxyUrl: string, agent: Agent): string {
   const url = new URL('/token', proxyUrl);
@@ -10,7 +11,8 @@ function tokenUrl(proxyUrl: string, agent: Agent): string {
 
 async function readTokenResponse(res: Response, url: string): Promise<string> {
   const body = (await res.text()).trim();
-  if (!res.ok) throw new Error(`Proxy returned HTTP ${res.status} from ${url}: ${body}`);
+  // Error bodies are short JSON from the proxy; cap them in case something else (a tunnel error page) answered
+  if (!res.ok) throw new Error(`Proxy returned HTTP ${res.status} from ${url}: ${body.slice(0, 500)}`);
   return body;
 }
 

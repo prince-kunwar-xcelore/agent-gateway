@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getArg, getArgs } from './args';
-import { parseAllowList } from './allowlist';
+import { getArg, getArgs, parseAgents, parsePort } from './args';
+import { parseAllowList, type Constraints } from './allowlist';
 import { DEFAULT_AUDIENCE } from './oidc';
 import { AGENTS, type Agent } from './token-reader';
 
@@ -28,7 +28,13 @@ export interface GatewayConfig {
   port: number;
   agents: Agent[];
   privateKey: { enabled: boolean; publicKeyPath: string | null };
-  allowlist: { enabled: boolean; allow: string[]; audience: string };
+  allowlist: {
+    enabled: boolean;
+    allow: string[];
+    audience: string;
+    /** Optional per-entry claim constraints, keyed by entry. See allowlist.ts. */
+    constraints?: Record<string, Constraints>;
+  };
   tunnel?: TunnelConfig;
 }
 
@@ -63,6 +69,7 @@ export function loadConfig(file: string): GatewayConfig | null {
   } catch (err) {
     throw new Error(`Invalid JSON in ${file}: ${err instanceof Error ? err.message : String(err)}`);
   }
+  if (!isObject(parsed)) throw new Error(`${file} must contain a JSON object`);
   const defaults = defaultConfig();
   return {
     ...defaults,
@@ -97,6 +104,9 @@ export function validateConfig(config: GatewayConfig): string[] {
   if (!config.privateKey || typeof config.privateKey !== 'object') shapeErrors.push('"privateKey" must be an object');
   if (!config.allowlist || typeof config.allowlist !== 'object') shapeErrors.push('"allowlist" must be an object');
   else if (!Array.isArray(config.allowlist.allow)) shapeErrors.push('"allowlist.allow" must be an array');
+  else if (config.allowlist.constraints !== undefined && !isObject(config.allowlist.constraints)) {
+    shapeErrors.push('"allowlist.constraints" must be an object');
+  }
   if (shapeErrors.length) return shapeErrors;
 
   const errors: string[] = [];
@@ -113,7 +123,7 @@ export function validateConfig(config: GatewayConfig): string[] {
     errors.push('Private-key mode is enabled but no publicKeyPath is set');
   }
   try {
-    parseAllowList(config.allowlist.allow);
+    parseAllowList(config.allowlist.allow, config.allowlist.constraints);
   } catch (err) {
     errors.push(err instanceof Error ? err.message : String(err));
   }
@@ -123,18 +133,21 @@ export function validateConfig(config: GatewayConfig): string[] {
 /**
  * Effective serve settings: the config file (if any) with CLI flags overriding
  * it field by field. With no config file and no mode flags, private-key mode
- * uses ./public.pem — the original zero-flag behaviour.
+ * uses ./public.pem — the original zero-flag behaviour. A `--config` that
+ * names a missing file is an error (the service always passes one), so a
+ * moved config can't silently switch auth modes.
  */
-export function resolveServeConfig(args: string[]): { config: GatewayConfig; source: string | null } {
-  const file = configPath(args);
+export function resolveServeConfig(args: string[], defaultPath = DEFAULT_CONFIG_PATH): { config: GatewayConfig; source: string | null } {
+  const file = path.resolve(getArg(args, '--config', defaultPath)!);
   const fromFile = loadConfig(file);
+  if (!fromFile && args.includes('--config')) throw new Error(`Config file not found: ${file}`);
   const config = fromFile ?? defaultConfig();
 
   const port = getArg(args, '--port');
-  if (port) config.port = parseInt(port, 10);
+  if (port) config.port = parsePort(port);
 
   const agents = getArg(args, '--agents');
-  if (agents) config.agents = agents.split(',').map((a) => a.trim()) as Agent[];
+  if (agents) config.agents = parseAgents(agents);
 
   const allow = getArgs(args, '--allow');
   if (allow.length) config.allowlist = { ...config.allowlist, enabled: true, allow };

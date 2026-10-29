@@ -2,9 +2,10 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getArg } from '../args';
-import { configPath, requireConfig, saveConfig, GATEWAY_DIR, type GatewayConfig } from '../config';
-import { lingerHint, serviceManager, which, type ServiceSpec } from '../service';
+import { getArg, parseHostname } from '../args';
+import { configPath, loadConfig, requireConfig, saveConfig, GATEWAY_DIR, type GatewayConfig, type TunnelConfig } from '../config';
+import { lingerHint, serviceManager, which, type ServiceManager, type ServiceSpec } from '../service';
+import { fetchHealth, type Health } from './service';
 
 /**
  * Optional helpers to expose the proxy publicly. The proxy itself is
@@ -29,9 +30,18 @@ function requireBin(bin: string, install: string): string {
 
 // ── Cloudflare ───────────────────────────────────────────────────────────────
 
-function setupCloudflare(args: string[], config: GatewayConfig): { spec: ServiceSpec; hostname: string; tunnelName: string } {
-  const hostname = getArg(args, '--hostname');
-  if (!hostname) throw new Error('Usage: tunnel setup cloudflare --hostname <sub.your-domain.com> [--name <tunnel>]');
+interface TunnelSetup {
+  spec: ServiceSpec;
+  hostname: string;
+  tunnelName?: string;
+  /** The DNS record existed before setup, so it may point at another tunnel. */
+  dnsPreexisting?: boolean;
+}
+
+function setupCloudflare(args: string[], config: GatewayConfig): TunnelSetup {
+  const hostnameArg = getArg(args, '--hostname');
+  if (!hostnameArg) throw new Error('Usage: tunnel setup cloudflare --hostname <sub.your-domain.com> [--name <tunnel>]');
+  const hostname = parseHostname('--hostname', hostnameArg);
   const name = getArg(args, '--name', DEFAULT_TUNNEL_NAME)!;
   const cloudflared = requireBin('cloudflared', 'Install it: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/');
 
@@ -70,8 +80,10 @@ function setupCloudflare(args: string[], config: GatewayConfig): { spec: Service
   }
 
   const route = exec(cloudflared, ['tunnel', 'route', 'dns', name, hostname]);
+  // An existing record may target a different tunnel; it's checked through /health once the tunnel is up
+  const dnsPreexisting = !route.ok && /already exists/i.test(route.stderr);
   if (route.ok) console.log(`[tunnel] DNS: ${hostname} → ${name}`);
-  else if (/already exists/i.test(route.stderr)) console.log(`[tunnel] DNS record for ${hostname} already exists — leaving it as is.`);
+  else if (dnsPreexisting) console.log(`[tunnel] DNS record for ${hostname} already exists — will check that it reaches this proxy.`);
   else throw new Error(`cloudflared tunnel route dns failed: ${route.stderr}`);
 
   // Dedicated config so ~/.cloudflared/config.yml is left alone
@@ -91,6 +103,7 @@ ingress:
   return {
     hostname,
     tunnelName: name,
+    dnsPreexisting,
     spec: {
       name: TUNNEL_SERVICE,
       description: `Agent Gateway tunnel (Cloudflare → ${hostname})`,
@@ -101,9 +114,10 @@ ingress:
 
 // ── ngrok ────────────────────────────────────────────────────────────────────
 
-function setupNgrok(args: string[], config: GatewayConfig): { spec: ServiceSpec; hostname: string } {
-  const domain = getArg(args, '--domain');
-  if (!domain) throw new Error('Usage: tunnel setup ngrok --domain <name.ngrok-free.app>');
+function setupNgrok(args: string[], config: GatewayConfig): TunnelSetup {
+  const domainArg = getArg(args, '--domain');
+  if (!domainArg) throw new Error('Usage: tunnel setup ngrok --domain <name.ngrok-free.app>');
+  const domain = parseHostname('--domain', domainArg);
   const ngrok = requireBin('ngrok', 'Install it: https://ngrok.com/download');
 
   // The service won't see shell env vars, so the authtoken must be in ngrok's config file
@@ -127,15 +141,73 @@ function setupNgrok(args: string[], config: GatewayConfig): { spec: ServiceSpec;
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
-async function checkPublicHealth(hostname: string, attempts = 10): Promise<boolean> {
+export type PublicHealth = 'this-proxy' | 'other' | 'reachable' | 'unreachable';
+
+/**
+ * Does https://<hostname>/health answer, and is it this proxy? Compared by
+ * the per-process instance_id, when the local proxy is running to compare
+ * with. 'other' means something else answers there, e.g. a DNS record that
+ * points at a different tunnel.
+ */
+export async function checkPublicHealth(
+  hostname: string,
+  local: Health | null,
+  attempts = 10,
+  delayMs = 2000,
+): Promise<{ reach: PublicHealth; status: number | null }> {
+  let result: PublicHealth = 'unreachable';
+  let status: number | null = null;
   for (let i = 0; i < attempts; i++) {
+    if (i) await new Promise((r) => setTimeout(r, delayMs));
+    let res: Response;
     try {
-      const res = await fetch(`https://${hostname}/health`, { signal: AbortSignal.timeout(5000) });
-      if (res.ok) return true;
-    } catch { /* not up yet */ }
-    await new Promise((r) => setTimeout(r, 2000));
+      res = await fetch(`https://${hostname}/health`, { signal: AbortSignal.timeout(5000) });
+    } catch { continue; /* not up yet */ }
+    // Cloudflare answers 5xx (e.g. 530) while the tunnel is still connecting
+    if (res.status >= 500) continue;
+    status = res.status;
+    const remote = (await res.json().catch(() => null)) as Health | null;
+    if (!local?.instance_id) {
+      if (remote?.instance_id || remote?.modes) return { reach: 'reachable', status };
+      result = 'other';
+      continue;
+    }
+    if (remote?.instance_id === local.instance_id) return { reach: 'this-proxy', status };
+    result = 'other';
   }
-  return false;
+  return { reach: result, status };
+}
+
+/**
+ * Install and start the tunnel service, then record it in the config. If
+ * anything fails the unit is removed again (and a tunnel entry whose service
+ * was replaced is dropped), so the config and the installed service never
+ * disagree.
+ */
+export async function installTunnel(
+  manager: ServiceManager,
+  setup: TunnelSetup,
+  entry: TunnelConfig,
+  file: string,
+  config: GatewayConfig,
+  verify: () => Promise<void>,
+): Promise<void> {
+  const stub: ServiceSpec = { name: TUNNEL_SERVICE, description: '', command: [] };
+  if (manager.state(stub).active) manager.stop(stub);
+  try {
+    manager.install(setup.spec);
+    manager.enable(setup.spec);
+    manager.start(setup.spec);
+    await verify();
+  } catch (err) {
+    try { manager.uninstall(setup.spec); } catch { /* best effort */ }
+    // The previous tunnel's unit was overwritten by the install, so it can't be restored
+    const replaced = config.tunnel ? ` It replaced the previous tunnel (${config.tunnel.hostname}), which is gone too: run setup for it again if you need it.` : '';
+    if (config.tunnel) { delete config.tunnel; saveConfig(file, config); }
+    throw new Error(`${err instanceof Error ? err.message : String(err)}\n[tunnel] Rolled back: the tunnel service was removed.${replaced}`);
+  }
+  config.tunnel = entry;
+  saveConfig(file, config);
 }
 
 export async function runTunnel(args: string[]): Promise<void> {
@@ -147,23 +219,32 @@ export async function runTunnel(args: string[]): Promise<void> {
   switch (action) {
     case 'setup': {
       const config = requireConfig(file);
-      let result: { spec: ServiceSpec; hostname: string; tunnelName?: string };
+      let result: TunnelSetup;
       if (provider === 'cloudflare') result = setupCloudflare(args, config);
       else if (provider === 'ngrok') result = setupNgrok(args, config);
       else throw new Error('Usage: tunnel setup cloudflare --hostname <host> | tunnel setup ngrok --domain <domain>');
 
-      if (manager.state(stub).active) manager.stop(stub);
-      manager.install(result.spec);
-      manager.enable(result.spec);
-      manager.start(result.spec);
-      console.log(`[tunnel] Installed and started ${manager.unitPath(result.spec)}`);
-
-      config.tunnel = { provider: provider as 'cloudflare' | 'ngrok', hostname: result.hostname, tunnelName: result.tunnelName };
-      saveConfig(file, config);
-
       const url = `https://${result.hostname}`;
+      const entry: TunnelConfig = { provider, hostname: result.hostname, tunnelName: result.tunnelName };
+      await installTunnel(manager, result, entry, file, config, async () => {
+        console.log(`[tunnel] Installed and started ${manager.unitPath(result.spec)}; checking ${url}/health…`);
+        const local = await fetchHealth(config.port);
+        const { reach, status } = await checkPublicHealth(result.hostname, local);
+        if (reach === 'other') {
+          throw new Error(
+            `${url}/health is answered by something other than this proxy (HTTP ${status}).` +
+            (result.dnsPreexisting
+              ? ` The existing DNS record for ${result.hostname} probably points at another tunnel: delete it in the Cloudflare dashboard (or use another --hostname) and run setup again.`
+              : ' Check where the hostname points.'),
+          );
+        }
+        console.log(`[tunnel] ${
+          reach === 'this-proxy' ? `${url}/health reaches this proxy.`
+          : reach === 'reachable' ? `${url}/health answers, but the proxy isn't running locally to confirm it is this one${result.dnsPreexisting ? ' — the DNS record existed before, so check "tunnel status" once the proxy runs' : ''}.`
+          : `${url}/health is not reachable yet — check "tunnel status" and that the proxy is running.`
+        }`);
+      });
       console.log(`[tunnel] Public URL: ${url}  ← set this as the AGENT_GATEWAY_URL CI secret`);
-      console.log(`[tunnel] ${(await checkPublicHealth(result.hostname)) ? `${url}/health is reachable.` : `${url}/health is not reachable yet — check "tunnel status" and that the proxy is running.`}`);
       const hint = lingerHint();
       if (hint) console.log(`[tunnel] ${hint}`);
       break;
@@ -177,23 +258,29 @@ export async function runTunnel(args: string[]): Promise<void> {
       break;
 
     case 'status': {
-      const config = requireConfig(file);
+      // Tolerate a missing config: the service may still be installed
+      const config = loadConfig(file);
       const state = manager.state(stub);
       console.log(`agent-gateway-tunnel (${manager.unitPath(stub)})`);
       console.log(`  service:    ${state.installed ? state.detail : 'not installed'}`);
-      if (config.tunnel) {
+      if (config?.tunnel) {
+        const { reach } = await checkPublicHealth(config.tunnel.hostname, await fetchHealth(config.port), 1);
         console.log(`  provider:   ${config.tunnel.provider}${config.tunnel.tunnelName ? ` (tunnel "${config.tunnel.tunnelName}")` : ''}`);
         console.log(`  public URL: https://${config.tunnel.hostname}`);
-        console.log(`  health:     ${(await checkPublicHealth(config.tunnel.hostname, 1)) ? 'reachable' : 'UNREACHABLE'}`);
+        console.log(`  health:     ${{ 'this-proxy': 'reaches this proxy', reachable: 'reachable', other: 'ANSWERED BY SOMETHING ELSE', unreachable: 'UNREACHABLE' }[reach]}`);
       }
       break;
     }
 
     case 'remove': {
-      const config = requireConfig(file);
+      // Tolerate a missing config so an orphaned service can still be removed
+      const config = loadConfig(file);
+      if (!manager.state(stub).installed && !config?.tunnel) throw new Error('No tunnel service is installed.');
       manager.uninstall(stub);
-      delete config.tunnel;
-      saveConfig(file, config);
+      if (config?.tunnel) {
+        delete config.tunnel;
+        saveConfig(file, config);
+      }
       console.log('[tunnel] Removed the tunnel service. Cloudflare tunnels and DNS records are left in place;');
       console.log('[tunnel]   delete them with "cloudflared tunnel delete <name>" if you no longer need them.');
       break;

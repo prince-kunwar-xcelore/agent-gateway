@@ -5,6 +5,7 @@ import { runServe }         from './commands/serve';
 import { runInit, runConfig, runAllow, runMode } from './commands/config';
 import { runService }       from './commands/service';
 import { runTunnel }        from './commands/tunnel';
+import { COMMAND_FLAGS, parseCommandArgs } from './args';
 
 const [subcommand, ...args] = process.argv.slice(2);
 
@@ -35,12 +36,17 @@ Setup:
 
 Config (changes restart a running service; --no-restart to skip):
   config show | path
-  allow add <entry...> | allow remove <entry...> | allow list
+  allow add <entry...> [--require <claim>=<pattern>[,<pattern>]]...
+  allow remove <entry...> | allow list
                                 Entries:
                                   owner/repo, owner/*                    GitHub (same as github:owner/*)
                                   gitlab:group/project, gitlab:group/*   gitlab.com
                                   gitlab@https://host:group/*            self-hosted GitLab
                                 Only issuers named by an entry are trusted.
+                                --require narrows the entries to tokens whose claim matches
+                                (* = any characters), e.g. event_name=pull_request.
+                                GitHub claims: ref, event_name, workflow_ref, job_workflow_ref, environment
+                                GitLab claims: ref, pipeline_source, ci_config_ref_uri
   mode enable|disable private-key|allowlist [--public-key <path>]
   mode status
 
@@ -70,6 +76,10 @@ All commands accept --config <path>.
 `;
 
 async function main(): Promise<void> {
+  // `<subcommand> --help` shows the usage instead of failing as an unknown option
+  if (args.includes('--help') || args.includes('-h')) { console.log(HELP); return; }
+  if (subcommand && subcommand in COMMAND_FLAGS) parseCommandArgs(subcommand, args);
+
   switch (subcommand) {
     case 'generate-keys': runGenerateKeys(args); break;
     case 'decrypt-token': await runDecryptToken(args); break;

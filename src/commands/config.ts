@@ -1,20 +1,33 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getArg, getArgs, hasFlag } from '../args';
-import { parseAllowList } from '../allowlist';
+import { getArg, getArgs, hasFlag, parseAgents, parseCommandArgs, parsePort } from '../args';
+import { formatConstraints, parseAllowList, parseConstraints, parseRequireFlags } from '../allowlist';
 import {
   configPath, defaultConfig, loadConfig, requireConfig, saveConfig, validateConfig,
-  DEFAULT_PORT, type GatewayConfig,
+  type GatewayConfig,
 } from '../config';
-import type { Agent } from '../token-reader';
 import { restartIfRunning } from './service';
-
-/** Flags that take a value, so the following argument is not a positional. */
-const VALUE_FLAGS = new Set(['--config', '--public-key', '--port', '--agents', '--allow', '--audience']);
 
 function printConfig(file: string, config: GatewayConfig): void {
   console.log(`# ${file}`);
   console.log(JSON.stringify(config, null, 2));
+}
+
+/** Resolve a --public-key path and check it is the RSA-4096 public key the encryption layout expects. */
+function checkPublicKey(file: string): string {
+  const abs = path.resolve(file);
+  let key: crypto.KeyObject;
+  try {
+    key = crypto.createPublicKey(fs.readFileSync(abs, 'utf8'));
+  } catch (err) {
+    const missing = (err as NodeJS.ErrnoException).code === 'ENOENT';
+    throw new Error(`${missing ? 'Public key not found' : 'Not a PEM public key'}: ${abs}. Create one with "generate-keys".`);
+  }
+  if (key.asymmetricKeyType !== 'rsa' || key.asymmetricKeyDetails?.modulusLength !== 4096) {
+    throw new Error(`${abs} is not an RSA-4096 public key. Create one with "generate-keys".`);
+  }
+  return abs;
 }
 
 function saveValid(file: string, config: GatewayConfig): void {
@@ -31,9 +44,10 @@ export function runInit(args: string[]): void {
   }
 
   const config = defaultConfig();
-  config.port = parseInt(getArg(args, '--port', String(DEFAULT_PORT))!, 10);
+  const port = getArg(args, '--port');
+  if (port) config.port = parsePort(port);
   const agents = getArg(args, '--agents');
-  if (agents) config.agents = agents.split(',').map((a) => a.trim()) as Agent[];
+  if (agents) config.agents = parseAgents(agents);
 
   const allow = getArgs(args, '--allow');
   if (allow.length) {
@@ -41,11 +55,7 @@ export function runInit(args: string[]): void {
     config.allowlist.allow = parseAllowList(allow).map((e) => e.raw);
   }
   const publicKey = getArg(args, '--public-key');
-  if (publicKey) {
-    const abs = path.resolve(publicKey);
-    if (!fs.existsSync(abs)) throw new Error(`Public key not found: ${abs}. Create one with "generate-keys".`);
-    config.privateKey = { enabled: true, publicKeyPath: abs };
-  }
+  if (publicKey) config.privateKey = { enabled: true, publicKeyPath: checkPublicKey(publicKey) };
   if (!allow.length && !publicKey) {
     throw new Error('Choose at least one auth mode: --allow <owner/repo|owner/*> and/or --public-key <path>');
   }
@@ -73,42 +83,56 @@ export function runConfig(args: string[]): void {
 
 /** `allow add|remove|list` */
 export function runAllow(args: string[]): void {
-  const [action, ...rest] = args;
+  const [action, ...patterns] = parseCommandArgs('allow', args);
   const file = configPath(args);
   const config = requireConfig(file);
-  // Positional patterns: everything that isn't a flag or a value-taking flag's value
-  const patterns = rest.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(rest[i - 1]));
 
   if (action === 'list') {
-    if (!config.allowlist.allow.length) console.log('(empty)');
-    for (const entry of config.allowlist.allow) console.log(entry);
+    const entries = parseAllowList(config.allowlist.allow, config.allowlist.constraints);
+    if (!entries.length) console.log('(empty)');
+    for (const e of entries) console.log(e.constraints ? `${e.raw}  (requires ${formatConstraints(e.constraints)})` : e.raw);
     if (!config.allowlist.enabled) console.log('[allow] Note: allowlist mode is disabled ("mode enable allowlist").');
     return;
   }
   if ((action !== 'add' && action !== 'remove') || !patterns.length) {
-    throw new Error('Usage: allow add|remove <entry...> | allow list');
+    throw new Error('Usage: allow add <entry...> [--require claim=pattern ...] | allow remove <entry...> | allow list');
   }
+  const required = getArgs(args, '--require', false);
+  if (required.length && action !== 'add') throw new Error('--require only applies to "allow add"');
 
-  const current = parseAllowList(config.allowlist.allow);
+  const current = parseAllowList(config.allowlist.allow, config.allowlist.constraints);
   const changed = parseAllowList(patterns);
 
+  // parseAllowList canonicalises and de-duplicates, so entries compare by `raw`
+  const currentRaw = new Set(current.map((e) => e.raw));
+  // Re-key constraints by canonical entry so removals and replacements find them
+  const constraints = Object.fromEntries(current.filter((e) => e.constraints).map((e) => [e.raw, e.constraints!]));
   if (action === 'add') {
-    const added = changed.filter((e) => !current.some((c) => c.raw === e.raw));
-    config.allowlist.allow = [...current, ...added].map((e) => e.raw);
-    if (!added.length) { console.log('[allow] Nothing to add (already allowed).'); return; }
-    console.log(`[allow] Added: ${added.map((e) => e.raw).join(', ')}`);
+    const added = changed.filter((e) => !currentRaw.has(e.raw)).map((e) => e.raw);
+    if (!added.length && !required.length) { console.log('[allow] Nothing to add (already allowed).'); return; }
+    if (required.length) {
+      // Replaces any constraints the entries had; validated against each entry's platform
+      const requested = parseRequireFlags(required);
+      for (const e of changed) constraints[e.raw] = parseConstraints(e, requested);
+    }
+    config.allowlist.allow = [...currentRaw, ...added];
+    if (added.length) console.log(`[allow] Added: ${added.join(', ')}`);
+    if (required.length) console.log(`[allow] Constraints for ${changed.map((e) => e.raw).join(', ')}: ${formatConstraints(constraints[changed[0].raw])}`);
   } else {
-    const removing = new Set(changed.map((e) => e.raw));
-    const missing = changed.filter((e) => !current.some((c) => c.raw === e.raw));
-    if (missing.length) console.warn(`[allow] Not in allowlist: ${missing.map((e) => e.raw).join(', ')}`);
-    config.allowlist.allow = current.filter((e) => !removing.has(e.raw)).map((e) => e.raw);
-    if (missing.length === changed.length) return;
-    console.log(`[allow] Removed: ${changed.filter((e) => !missing.includes(e)).map((e) => e.raw).join(', ')}`);
+    const removed = changed.filter((e) => currentRaw.has(e.raw)).map((e) => e.raw);
+    const missing = changed.filter((e) => !currentRaw.has(e.raw)).map((e) => e.raw);
+    if (missing.length) console.warn(`[allow] Not in allowlist: ${missing.join(', ')}`);
+    if (!removed.length) return;
+    config.allowlist.allow = [...currentRaw].filter((raw) => !removed.includes(raw));
+    for (const raw of removed) delete constraints[raw];
+    console.log(`[allow] Removed: ${removed.join(', ')}`);
     if (config.allowlist.enabled && !config.allowlist.allow.length) {
       console.warn('[allow] Allowlist is now empty — every OIDC request will be rejected.');
     }
   }
 
+  if (Object.keys(constraints).length) config.allowlist.constraints = constraints;
+  else delete config.allowlist.constraints;
   saveValid(file, config);
   if (!config.allowlist.enabled) console.log('[allow] Note: allowlist mode is disabled ("mode enable allowlist").');
   restartIfRunning(args);
@@ -133,12 +157,10 @@ export function runMode(args: string[]): void {
   if (mode === 'private-key') {
     const publicKey = getArg(args, '--public-key');
     if (publicKey && !enable) throw new Error('--public-key only applies to "mode enable private-key"');
-    if (publicKey) config.privateKey.publicKeyPath = path.resolve(publicKey);
     if (enable) {
-      const keyPath = config.privateKey.publicKeyPath;
-      if (!keyPath || !fs.existsSync(keyPath)) {
-        throw new Error(`Public key ${keyPath ? `not found: ${keyPath}` : 'not set'}. Create one with "generate-keys", then pass --public-key <path>.`);
-      }
+      const keyPath = publicKey ?? config.privateKey.publicKeyPath;
+      if (!keyPath) throw new Error('Public key not set. Create one with "generate-keys", then pass --public-key <path>.');
+      config.privateKey.publicKeyPath = checkPublicKey(keyPath);
     }
     config.privateKey.enabled = enable;
   } else {

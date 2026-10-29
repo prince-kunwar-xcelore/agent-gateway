@@ -37,8 +37,17 @@ export interface OidcOptions {
 }
 
 type Jwk = crypto.JsonWebKey & { kid?: string };
-// The allowlist is fixed for the server's lifetime; derive its issuers once
-const issuersCache = new WeakMap<AllowEntry[], string[]>();
+
+/**
+ * A token rejection. `publicReason` names the failed check and is safe to
+ * return to an unauthenticated caller; the message adds configuration details
+ * (expected audience, key ids…) for the proxy's own log.
+ */
+export class OidcError extends Error {
+  constructor(readonly publicReason: string, detail?: string) {
+    super(detail ? `${publicReason}: ${detail}` : publicReason);
+  }
+}
 const jwksCache = new Map<string, { keys: Jwk[]; fetchedAt: number }>();
 
 function b64urlJson<T>(part: string): T {
@@ -75,26 +84,21 @@ export function repoFromClaims(claims: OidcClaims): string | null {
  */
 export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<OidcClaims> {
   const parts = jwt.split('.');
-  if (parts.length !== 3) throw new Error('Malformed JWT');
+  if (parts.length !== 3) throw new OidcError('Malformed JWT');
   const [headerB64, payloadB64, signatureB64] = parts;
 
   const header = b64urlJson<{ alg: string; kid?: string }>(headerB64);
-  if (header.alg !== 'RS256') throw new Error(`Unsupported JWT alg: ${header.alg}`);
+  if (header.alg !== 'RS256') throw new OidcError('Unsupported JWT alg', header.alg);
   // Without a kid, find() would match any JWKS entry that also lacks one
-  if (!header.kid) throw new Error('JWT header has no kid');
+  if (!header.kid) throw new OidcError('JWT header has no kid');
 
   // Trust the issuer only after checking it against our list — it selects the JWKS.
   const unverified = b64urlJson<OidcClaims>(payloadB64);
   if (!unverified || typeof unverified !== 'object' || typeof unverified.iss !== 'string') {
-    throw new Error('JWT payload has no issuer');
+    throw new OidcError('JWT payload has no issuer');
   }
-  let issuers = issuersCache.get(opts.allow);
-  if (!issuers) {
-    issuers = trustedIssuers(opts.allow);
-    issuersCache.set(opts.allow, issuers);
-  }
-  const issuer = issuers.find((i) => i.replace(/\/$/, '') === unverified.iss.replace(/\/$/, ''));
-  if (!issuer) throw new Error(`Untrusted issuer: ${unverified.iss}`);
+  const issuer = trustedIssuers(opts.allow).find((i) => i.replace(/\/$/, '') === unverified.iss.replace(/\/$/, ''));
+  if (!issuer) throw new OidcError('Untrusted issuer', unverified.iss);
 
   let keys = await getJwks(issuer);
   let jwk = keys.find((k) => k.kid === header.kid);
@@ -103,7 +107,7 @@ export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<O
     keys = await getJwks(issuer, true);
     jwk = keys.find((k) => k.kid === header.kid);
   }
-  if (!jwk) throw new Error(`No JWKS key matches kid ${header.kid}`);
+  if (!jwk) throw new OidcError('No JWKS key matches the token\'s kid', header.kid);
 
   const valid = crypto.verify(
     'RSA-SHA256',
@@ -111,18 +115,23 @@ export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<O
     crypto.createPublicKey({ key: jwk, format: 'jwk' }),
     Buffer.from(signatureB64, 'base64url'),
   );
-  if (!valid) throw new Error('Invalid JWT signature');
+  if (!valid) throw new OidcError('Invalid JWT signature');
 
   const claims = unverified;
   const now = Math.floor(Date.now() / 1000);
-  if (typeof claims.exp !== 'number' || claims.exp + CLOCK_SKEW_S < now) throw new Error('Token expired');
-  if (typeof claims.nbf === 'number' && claims.nbf - CLOCK_SKEW_S > now) throw new Error('Token not yet valid');
+  if (typeof claims.exp !== 'number' || claims.exp + CLOCK_SKEW_S < now) throw new OidcError('Token expired');
+  if (typeof claims.nbf === 'number' && claims.nbf - CLOCK_SKEW_S > now) throw new OidcError('Token not yet valid');
 
   const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  if (!audiences.includes(opts.audience)) throw new Error(`Audience mismatch: expected ${opts.audience}`);
+  if (!audiences.includes(opts.audience)) throw new OidcError('Audience mismatch', `expected ${opts.audience}`);
 
   if (!opts.allow.some((entry) => entryAllows(entry, issuer, claims))) {
-    throw new Error(`Repository not allowlisted for ${issuer}: ${repoFromClaims(claims) ?? '(no repo claim)'}`);
+    const repo = repoFromClaims(claims);
+    // Say whether the repo matched but a constraint (ref, event, workflow…) didn't
+    const constrained = repo !== null && opts.allow.some((e) => e.constraints && entryAllows({ ...e, constraints: undefined }, issuer, claims));
+    throw constrained
+      ? new OidcError('Repository matches an allow entry but not its claim constraints', `${repo} (${issuer})`)
+      : new OidcError('Repository not allowlisted', `${repo ?? '(no repo claim)'} (${issuer})`);
   }
 
   return claims;

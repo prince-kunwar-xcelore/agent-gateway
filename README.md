@@ -23,6 +23,23 @@ agent-gateway service (serve)           pr-audit --engine <agent>-cli --auth-tok
 
 Credentials are encrypted with **RSA-OAEP + AES-256-GCM** hybrid encryption before leaving your machine, so the tunnel in between (Cloudflare, ngrok, …) never sees them.
 
+### Keeping the login fresh
+
+Served credentials have their **refresh token removed** (Codex: blanked, with `last_refresh` set to now),
+so CI can use the access token but can never refresh it. Both providers rotate refresh tokens on use, so a
+refresh in CI would otherwise log out the CLI on your machine.
+
+Because CI can't refresh, the gateway keeps the local login fresh itself. When an access token is close to
+expiry (Claude: 10 minutes; Codex: 1 day, since Codex refreshes ~2 days before its 10-day tokens expire),
+the daemon runs the CLI once with a trivial prompt (`claude -p 'Reply with OK' --tools ''` /
+`codex exec … 'Reply with OK'`), which makes it refresh its own credentials file. This costs one tiny
+request per refresh (about every 8 hours for Claude). It is rate-limited to one run per 4 minutes per agent.
+
+Credentials expiring within 2 minutes are never served: `/token` returns 503 and `/health` shows the
+agent as failing with the reason (e.g. a local refresh that failed because you were logged out). The
+service finds `claude` / `codex` through the PATH recorded at `service install`. If you install a CLI
+later or move it, run `service install --force`.
+
 ### Two auth modes — enable either or both
 
 | | Private key | Allowlist (OIDC) |
@@ -102,6 +119,11 @@ agent-gateway tunnel status | stop | start | remove
 ```
 
 Cloudflare's helper writes its own `~/.agent-gateway/cloudflared.yml` and leaves `~/.cloudflared/config.yml` alone.
+After starting the tunnel, setup checks that `https://<host>/health` is answered by **this** proxy (it compares
+the `instance_id` that `/health` reports; start the proxy service first so there is something to compare with).
+If something else answers, for example because an existing DNS record for the hostname points at another
+tunnel, setup fails and says so. Any failure rolls back: the tunnel service is removed, and the config is
+only updated once the tunnel works.
 If you point a custom domain at ngrok through Cloudflare DNS, its CNAME must be "DNS only" (grey cloud).
 
 ### 5. Add the CI secret
@@ -142,12 +164,17 @@ Setup:
 
 Config (changes restart a running service; --no-restart to skip):
   config show | path
-  allow add <entry...> | allow remove <entry...> | allow list
+  allow add <entry...> [--require <claim>=<pattern>[,<pattern>]]...
+  allow remove <entry...> | allow list
                                 Entries:
                                   owner/repo, owner/*                    GitHub (same as github:owner/*)
                                   gitlab:group/project, gitlab:group/*   gitlab.com
                                   gitlab@https://host:group/*            self-hosted GitLab
                                 Only issuers named by an entry are trusted.
+                                --require narrows the entries to tokens whose claim matches
+                                (* = any characters), e.g. event_name=pull_request.
+                                GitHub claims: ref, event_name, workflow_ref, job_workflow_ref, environment
+                                GitLab claims: ref, pipeline_source, ci_config_ref_uri
   mode enable|disable private-key|allowlist [--public-key <path>]
   mode status
 
@@ -257,8 +284,51 @@ Files under `~/.agent-gateway/`: `config.json`, `cloudflared.yml` (if used), the
 token cache, and on macOS the service logs. Running `serve` by hand still works and accepts flags that
 override the config (`serve --allow owner/* --port 7433`), or no config at all.
 
-If you update Node (e.g. via nvm), reinstall with `service install --force`: the unit pins the absolute
-runtime path it was installed with.
+If you update Node (e.g. via nvm) or install / move the `claude` or `codex` CLI, reinstall with
+`service install --force`: the unit pins the absolute runtime path and the CLI directories it was
+installed with.
+
+### Narrowing entries to a workflow, ref or event
+
+By default an entry trusts any job in the repo that can get an OIDC token: any branch, any workflow.
+`--require` adds claim constraints to entries; the token's claim must match one of the patterns
+(`*` matches any characters, including `/`), and a token without the claim is refused:
+
+```bash
+# Only the PR review workflow, only for pull_request events
+agent-gateway allow add your-user/repo \
+  --require event_name=pull_request \
+  --require 'job_workflow_ref=your-user/repo/.github/workflows/pr-review.yml@*'
+
+# GitLab: only merge request pipelines
+agent-gateway allow add gitlab:my-group/* --require pipeline_source=merge_request_event
+```
+
+They are stored in `config.json` under `allowlist.constraints`, keyed by entry:
+
+```json
+"allowlist": {
+  "enabled": true,
+  "allow": ["github:your-user/repo"],
+  "constraints": {
+    "github:your-user/repo": {
+      "event_name": ["pull_request"],
+      "job_workflow_ref": ["your-user/repo/.github/workflows/pr-review.yml@*"]
+    }
+  }
+}
+```
+
+Claims: GitHub `ref`, `event_name`, `workflow_ref`, `job_workflow_ref`, `environment`; GitLab `ref`,
+`pipeline_source`, `ci_config_ref_uri`. `allow add` with `--require` replaces an entry's constraints;
+`allow remove` drops them. Entries are checked independently, so a broader unconstrained entry
+(`your-user/*`) still lets everything in that it matches. `allow list` shows the constraints.
+
+Note that on `pull_request` runs the workflow file comes from the PR branch and `job_workflow_ref`
+ends in `@refs/pull/<n>/merge`. A constraint on it limits *which* workflow file may ask for credentials,
+not what that file contains, so anyone with write access can still edit it in a PR. Constraints narrow
+accidental exposure (other workflows, push events, other branches); they don't replace trusting the
+repo's writers.
 
 ## Encryption scheme
 
@@ -295,7 +365,7 @@ src/
   issuers.ts             built-in GitHub / gitlab.com OIDC issuers
   service.ts             systemd user units + launchd LaunchAgents (macOS untested)
   token-reader.ts        reads Claude (disk/keychain) and Codex (auth.json) credentials
-  daemon.ts              15-min per-agent refresh loop + disk cache + in-memory state
+  daemon.ts              per-agent refresh loop, local login refresh near expiry, disk cache
   oidc.ts                CI OIDC token verification + repo allowlist
   server.ts              HTTP server: GET/POST /token, GET /health
   client.ts              HTTP client + CI OIDC token acquisition for decrypt-token
@@ -322,9 +392,9 @@ plans/
 
 - `private.pem` is gitignored and should never be committed
 - Private-key mode: `GET /token` requires no auth — the response is encrypted and useless without the private key, which lives only in CI secrets and your local disk (`private.pem`). Anyone with that key and the URL can fetch your credentials.
-- Allowlist mode: credentials go only to CI jobs whose OIDC token proves they run in an allowlisted repo **on the platform the entry names** (bare / `github:` entries never match GitLab tokens; gitlab.com and self-hosted issuers are trusted only when an entry names them). Anyone who can change workflows in an allowlisted repo can still obtain them; GitHub does not issue OIDC tokens to `pull_request` runs from forks. Narrowing entries to a workflow, ref or event is tracked in [#7](https://github.com/prince-kunwar-xcelore/agent-gateway/issues/7).
+- Allowlist mode: credentials go only to CI jobs whose OIDC token proves they run in an allowlisted repo **on the platform the entry names** (bare / `github:` entries never match GitLab tokens; gitlab.com and self-hosted issuers are trusted only when an entry names them). Anyone who can change workflows in an allowlisted repo can still obtain them, unless the entry has [claim constraints](#narrowing-entries-to-a-workflow-ref-or-event); GitHub does not issue OIDC tokens to `pull_request` runs from forks.
 - OIDC tokens are verified against the issuer's published keys (signature, `iss`, `aud`, `exp`/`nbf`, `kid` required). Unknown `kid`s trigger at most one key refetch per minute per issuer. Request bodies are capped at 16 KB.
 - Credentials are encrypted to a key generated by the CI job (allowlist) or to your `public.pem` (private key), so the tunnel never sees them in clear text. In CI they currently pass through `pr-audit`'s command line; moving that to a masked file is tracked in [pr-audit#8](https://github.com/prince-kunwar-xcelore/pr-audit/issues/8).
 - Raw credentials are held in memory only; the disk cache (`~/.agent-gateway/`) stores the private-key-mode ciphertext.
-- Full credentials (including refresh tokens) are served. If CI refreshes them, the provider may rotate the refresh token and log out your local session.
-- `/health` is public (it's how `tunnel status` checks reachability) and reports enabled modes, per-agent credential age and refresh errors, plus `warnings` (e.g. an empty allowlist). Alert if `ok` is false or `age_seconds` exceeds 3600: credentials are re-read every 15 minutes.
+- Refresh tokens are never served (see [Keeping the login fresh](#keeping-the-login-fresh)): a leaked copy stops working when its access token expires (Claude ~8 hours, Codex ~10 days).
+- `/health` is public (it's how `tunnel status` checks reachability) and reports a random per-process `instance_id`, enabled modes, per-agent credential age, access-token expiry, refresh errors and the last local refresh, plus `warnings` (e.g. an empty allowlist). Alert if `ok` is false or `age_seconds` exceeds 3600: credentials are re-read every 15 minutes.

@@ -2,7 +2,7 @@ import { getArgs } from '../args';
 import { loadPem } from '../crypto';
 import { startDaemon } from '../daemon';
 import { startServer } from '../server';
-import { parseAllowList, trustedIssuers } from '../allowlist';
+import { formatConstraints, parseAllowList, trustedIssuers } from '../allowlist';
 import { resolveServeConfig, validateConfig } from '../config';
 
 export function runServe(args: string[]): void {
@@ -12,7 +12,14 @@ export function runServe(args: string[]): void {
     process.exit(1);
   }
 
-  const { config, source } = resolveServeConfig(args);
+  let resolved: ReturnType<typeof resolveServeConfig>;
+  try {
+    resolved = resolveServeConfig(args);
+  } catch (err) {
+    console.error(`[startup] ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+  const { config, source } = resolved;
 
   const errors = validateConfig(config);
   if (errors.length) {
@@ -34,12 +41,13 @@ export function runServe(args: string[]): void {
     console.log(`[startup] Private-key mode: ${publicKeyPath}`);
   }
 
-  const allow = parseAllowList(config.allowlist.allow);
+  const allow = parseAllowList(config.allowlist.allow, config.allowlist.constraints);
   const oidc = config.allowlist.enabled ? { allow, audience: config.allowlist.audience } : null;
   if (oidc) {
     if (!allow.length) console.warn('[startup] Allowlist mode is enabled but the allowlist is empty — every OIDC request will be rejected.');
     console.log(`[startup] Allowlist mode: ${allow.map((e) => e.raw).join(', ') || '(empty)'} (audience "${oidc.audience}")`);
     console.log(`[startup]   Trusted issuers: ${trustedIssuers(allow).join(', ') || '(none)'}`);
+    for (const e of allow.filter((e) => e.constraints)) console.log(`[startup]   ${e.raw} requires ${formatConstraints(e.constraints!)}`);
   }
 
   console.log(`[startup] Starting on port ${config.port}...`);

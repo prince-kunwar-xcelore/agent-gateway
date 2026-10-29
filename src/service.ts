@@ -17,6 +17,8 @@ export interface ServiceSpec {
   description: string;
   /** Absolute command + arguments. */
   command: string[];
+  /** Extra directories for the service's PATH, e.g. where the agent CLIs live. */
+  pathDirs?: string[];
 }
 
 export interface ServiceState {
@@ -27,7 +29,7 @@ export interface ServiceState {
   detail: string;
 }
 
-interface ServiceManager {
+export interface ServiceManager {
   unitPath(spec: ServiceSpec): string;
   install(spec: ServiceSpec): void;
   uninstall(spec: ServiceSpec): void;
@@ -71,16 +73,28 @@ export function which(bin: string): string | null {
 
 // Services start with a minimal PATH; include the directories of the binaries we run.
 function servicePath(spec: ServiceSpec): string {
-  const dirs = new Set([path.dirname(spec.command[0]), '/usr/local/bin', '/usr/bin', '/bin']);
+  const dirs = new Set([path.dirname(spec.command[0]), ...(spec.pathDirs ?? []), '/usr/local/bin', '/usr/bin', '/bin']);
   return [...dirs].join(':');
 }
 
 // ── systemd (Linux) ──────────────────────────────────────────────────────────
 
+// A newline in a value would start a new directive in the unit file
+function rejectControlChars(value: string): void {
+  if (/[\x00-\x1f\x7f]/.test(value)) throw new Error(`Control characters are not allowed in a unit file value: ${JSON.stringify(value)}`);
+}
+
 // Quote for ExecStart; `$` and `%` would otherwise be expanded as variables / specifiers
 export const systemdQuote = (arg: string): string => {
+  rejectControlChars(arg);
   const escaped = arg.replace(/\$/g, '$$$$').replace(/%/g, '%%');
   return /[\s"'\\]/.test(escaped) ? `"${escaped.replace(/(["\\])/g, '\\$1')}"` : escaped;
+};
+
+// Environment= expands `%` specifiers (not `$`); quoting keeps spaces in the value
+export const systemdEnv = (name: string, value: string): string => {
+  rejectControlChars(value);
+  return `"${name}=${value.replace(/%/g, '%%').replace(/(["\\])/g, '\\$1')}"`;
 };
 
 const systemd: ServiceManager = {
@@ -88,15 +102,15 @@ const systemd: ServiceManager = {
 
   install(spec) {
     const unit = `[Unit]
-Description=${spec.description}
+Description=${spec.description.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/%/g, '%%')}
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 ExecStart=${spec.command.map(systemdQuote).join(' ')}
 WorkingDirectory=${GATEWAY_DIR.replace(/%/g, '%%')}
-Environment=HOME=${os.homedir()}
-Environment=PATH=${servicePath(spec)}
+Environment=${systemdEnv('HOME', os.homedir())}
+Environment=${systemdEnv('PATH', servicePath(spec))}
 Restart=on-failure
 RestartSec=5
 
@@ -112,7 +126,8 @@ WantedBy=default.target
   uninstall(spec) {
     spawnSync('systemctl', ['--user', 'disable', '--now', `${spec.name}.service`]);
     fs.rmSync(this.unitPath(spec), { force: true });
-    run('systemctl', ['--user', 'daemon-reload']);
+    // The unit file is already gone; a failed reload (e.g. no user bus) only delays systemd noticing
+    spawnSync('systemctl', ['--user', 'daemon-reload']);
   },
 
   start:   (spec) => void run('systemctl', ['--user', 'start', `${spec.name}.service`]),

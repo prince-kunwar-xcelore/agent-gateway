@@ -2,7 +2,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { encryptToken } from './crypto';
 import { ensureFresh, getState, getStates } from './daemon';
-import { verifyOidcToken, repoFromClaims, type OidcOptions } from './oidc';
+import { OidcError, verifyOidcToken, repoFromClaims, type OidcOptions } from './oidc';
 import type { Agent } from './token-reader';
 
 export interface ServerOptions {
@@ -15,6 +15,9 @@ export interface ServerOptions {
 }
 
 const MAX_BODY_BYTES = 16 * 1024;
+const REQUEST_TIMEOUT_MS = 30 * 1000;
+// Random per process, reported by /health so "tunnel setup" can tell that a public URL reaches this proxy
+const INSTANCE_ID = crypto.randomBytes(8).toString('hex');
 
 class BodyTooLargeError extends Error {}
 
@@ -31,7 +34,7 @@ class BodyTooLargeError extends Error {}
  * `agent` defaults to claude.
  */
 export function createServer(opts: ServerOptions): http.Server {
-  return http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
     if (url.pathname === '/token' && req.method === 'GET') {
@@ -52,7 +55,19 @@ export function createServer(opts: ServerOptions): http.Server {
       sendJson(res, 404, { error: 'Not Found' });
     }
   });
+  // Bound how long a client may take to send its request (e.g. a POST body that never finishes)
+  server.requestTimeout = REQUEST_TIMEOUT_MS;
+  return server;
 }
+
+/**
+ * The part of an OIDC rejection that is safe to return to an unauthenticated
+ * caller: which check failed, without configuration details. Anything that
+ * isn't a token rejection (e.g. a JWKS fetch error naming an internal URL)
+ * stays generic. The full reason is logged.
+ */
+export const publicOidcReason = (err: unknown): string =>
+  err instanceof OidcError ? err.publicReason : 'Token could not be verified';
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -135,7 +150,7 @@ async function handleOidcToken(
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     console.warn(`[server] OIDC rejected (${agent}): ${reason}`);
-    sendJson(res, 403, { error: 'OIDC verification failed', detail: reason });
+    sendJson(res, 403, { error: 'OIDC verification failed', detail: publicOidcReason(err) });
     return;
   }
 
@@ -180,11 +195,17 @@ function handleHealth(res: http.ServerResponse, opts: ServerOptions): void {
     const lastRefreshAt = state?.lastRefreshAt ?? null;
     const agentOk = lastRefreshAt !== null && !state?.lastError;
     ok &&= agentOk;
+    const expiresAt = state?.expiresAt ?? null;
     agents[agent] = {
       ok: agentOk,
       age_seconds: lastRefreshAt ? Math.floor((Date.now() - lastRefreshAt.getTime()) / 1000) : null,
       last_refresh: lastRefreshAt?.toISOString() ?? null,
       last_error: state?.lastError ?? null,
+      expires_at: expiresAt?.toISOString() ?? null,
+      expires_in_seconds: expiresAt ? Math.floor((expiresAt.getTime() - Date.now()) / 1000) : null,
+      ...(state?.lastLocalRefresh ? {
+        local_refresh: { at: state.lastLocalRefresh.at.toISOString(), error: state.lastLocalRefresh.error },
+      } : {}),
     };
   }
 
@@ -197,6 +218,7 @@ function handleHealth(res: http.ServerResponse, opts: ServerOptions): void {
 
   sendJson(res, 200, {
     ok,
+    instance_id: INSTANCE_ID,
     modes: { private_key: opts.keyMode, allowlist: opts.oidc !== null },
     ...(warnings.length ? { warnings } : {}),
     agents,
