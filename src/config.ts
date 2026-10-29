@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { getArg, getArgs, parseAgents, parsePort } from './args';
-import { parseAllowList } from './allowlist';
+import { parseAllowList, type Constraints } from './allowlist';
 import { DEFAULT_AUDIENCE } from './oidc';
 import { AGENTS, type Agent } from './token-reader';
 
@@ -28,7 +28,13 @@ export interface GatewayConfig {
   port: number;
   agents: Agent[];
   privateKey: { enabled: boolean; publicKeyPath: string | null };
-  allowlist: { enabled: boolean; allow: string[]; audience: string };
+  allowlist: {
+    enabled: boolean;
+    allow: string[];
+    audience: string;
+    /** Optional per-entry claim constraints, keyed by entry. See allowlist.ts. */
+    constraints?: Record<string, Constraints>;
+  };
   tunnel?: TunnelConfig;
 }
 
@@ -98,6 +104,9 @@ export function validateConfig(config: GatewayConfig): string[] {
   if (!config.privateKey || typeof config.privateKey !== 'object') shapeErrors.push('"privateKey" must be an object');
   if (!config.allowlist || typeof config.allowlist !== 'object') shapeErrors.push('"allowlist" must be an object');
   else if (!Array.isArray(config.allowlist.allow)) shapeErrors.push('"allowlist.allow" must be an array');
+  else if (config.allowlist.constraints !== undefined && !isObject(config.allowlist.constraints)) {
+    shapeErrors.push('"allowlist.constraints" must be an object');
+  }
   if (shapeErrors.length) return shapeErrors;
 
   const errors: string[] = [];
@@ -114,7 +123,7 @@ export function validateConfig(config: GatewayConfig): string[] {
     errors.push('Private-key mode is enabled but no publicKeyPath is set');
   }
   try {
-    parseAllowList(config.allowlist.allow);
+    parseAllowList(config.allowlist.allow, config.allowlist.constraints);
   } catch (err) {
     errors.push(err instanceof Error ? err.message : String(err));
   }

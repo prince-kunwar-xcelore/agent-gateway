@@ -55,3 +55,26 @@ test('accepts a gitlab.com token when explicitly allowed', async () => {
   const claims = await verifyOidcToken(mint(GITLAB_ISSUER, { project_path: 'group/sub/proj' }), opts(['gitlab:group/*']));
   assert.equal(claims.project_path, 'group/sub/proj');
 });
+
+test('claim constraints narrow an entry to matching refs, events and workflows', async () => {
+  const constrained = {
+    audience: 'agent-gateway',
+    allow: parseAllowList(['owner/repo', 'gitlab:group/*'], {
+      'Owner/repo': { event_name: 'pull_request', job_workflow_ref: ['owner/repo/.github/workflows/pr-review.yml@*'] },
+      'gitlab:group/*': { pipeline_source: ['merge_request_event'] },
+    }),
+  };
+  const pr = { repository: 'owner/repo', event_name: 'pull_request', job_workflow_ref: 'owner/repo/.github/workflows/pr-review.yml@refs/pull/1/merge' };
+  assert.equal((await verifyOidcToken(mint(GITHUB_ISSUER, pr), constrained)).repository, 'owner/repo');
+  await assert.rejects(
+    verifyOidcToken(mint(GITHUB_ISSUER, { ...pr, event_name: 'push' }), constrained),
+    /matches an entry but not its claim constraints/,
+  );
+  await assert.rejects(
+    verifyOidcToken(mint(GITHUB_ISSUER, { ...pr, job_workflow_ref: 'owner/repo/.github/workflows/evil.yml@refs/heads/x' }), constrained),
+    /claim constraints/,
+  );
+  // A constrained claim missing from the token never matches
+  await assert.rejects(verifyOidcToken(mint(GITLAB_ISSUER, { project_path: 'group/p' }), constrained), /claim constraints/);
+  assert.ok(await verifyOidcToken(mint(GITLAB_ISSUER, { project_path: 'group/p', pipeline_source: 'merge_request_event' }), constrained));
+});

@@ -36,12 +36,17 @@ Setup:
 
 Config (changes restart a running service; --no-restart to skip):
   config show | path
-  allow add <entry...> | allow remove <entry...> | allow list
+  allow add <entry...> [--require <claim>=<pattern>[,<pattern>]]...
+  allow remove <entry...> | allow list
                                 Entries:
                                   owner/repo, owner/*                    GitHub (same as github:owner/*)
                                   gitlab:group/project, gitlab:group/*   gitlab.com
                                   gitlab@https://host:group/*            self-hosted GitLab
                                 Only issuers named by an entry are trusted.
+                                --require narrows the entries to tokens whose claim matches
+                                (* = any characters), e.g. event_name=pull_request.
+                                GitHub claims: ref, event_name, workflow_ref, job_workflow_ref, environment
+                                GitLab claims: ref, pipeline_source, ci_config_ref_uri
   mode enable|disable private-key|allowlist [--public-key <path>]
   mode status
 

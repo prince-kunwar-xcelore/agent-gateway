@@ -37,8 +37,6 @@ export interface OidcOptions {
 }
 
 type Jwk = crypto.JsonWebKey & { kid?: string };
-// The allowlist is fixed for the server's lifetime; derive its issuers once
-const issuersCache = new WeakMap<AllowEntry[], string[]>();
 const jwksCache = new Map<string, { keys: Jwk[]; fetchedAt: number }>();
 
 function b64urlJson<T>(part: string): T {
@@ -88,12 +86,7 @@ export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<O
   if (!unverified || typeof unverified !== 'object' || typeof unverified.iss !== 'string') {
     throw new Error('JWT payload has no issuer');
   }
-  let issuers = issuersCache.get(opts.allow);
-  if (!issuers) {
-    issuers = trustedIssuers(opts.allow);
-    issuersCache.set(opts.allow, issuers);
-  }
-  const issuer = issuers.find((i) => i.replace(/\/$/, '') === unverified.iss.replace(/\/$/, ''));
+  const issuer = trustedIssuers(opts.allow).find((i) => i.replace(/\/$/, '') === unverified.iss.replace(/\/$/, ''));
   if (!issuer) throw new Error(`Untrusted issuer: ${unverified.iss}`);
 
   let keys = await getJwks(issuer);
@@ -122,7 +115,12 @@ export async function verifyOidcToken(jwt: string, opts: OidcOptions): Promise<O
   if (!audiences.includes(opts.audience)) throw new Error(`Audience mismatch: expected ${opts.audience}`);
 
   if (!opts.allow.some((entry) => entryAllows(entry, issuer, claims))) {
-    throw new Error(`Repository not allowlisted for ${issuer}: ${repoFromClaims(claims) ?? '(no repo claim)'}`);
+    const repo = repoFromClaims(claims);
+    // Say whether the repo matched but a constraint (ref, event, workflow…) didn't
+    const constrained = repo !== null && opts.allow.some((e) => e.constraints && entryAllows({ ...e, constraints: undefined }, issuer, claims));
+    throw new Error(constrained
+      ? `Repository not allowlisted for ${issuer}: ${repo} matches an entry but not its claim constraints`
+      : `Repository not allowlisted for ${issuer}: ${repo ?? '(no repo claim)'}`);
   }
 
   return claims;
