@@ -71,8 +71,9 @@ export function restartIfRunning(args: string[]): void {
   console.log('[service] Restarted agent-gateway to apply the change.');
 }
 
-interface Health {
+export interface Health {
   ok: boolean;
+  instance_id?: string;
   modes: { private_key: boolean; allowlist: boolean };
   warnings?: string[];
   agents: Record<string, { ok: boolean; age_seconds: number | null; last_error: string | null; expires_in_seconds?: number | null }>;
