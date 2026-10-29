@@ -6,6 +6,10 @@ import { readCredentials, type Agent } from './token-reader';
 
 const CACHE_DIR  = path.join(os.homedir(), '.agent-gateway');
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+// Timers don't advance while the machine sleeps, so staleness is checked against the wall clock
+const CHECK_INTERVAL_MS = 60 * 1000;
+// /token re-reads credentials older than this, so a request right after resume never gets a stale copy
+const MAX_SERVE_AGE_MS = 60 * 1000;
 
 const cacheFile = (agent: Agent): string => path.join(CACHE_DIR, `last-token-${agent}.enc`);
 
@@ -66,11 +70,25 @@ export async function refresh(agent: Agent, publicKeyPem: string | null): Promis
   }
 }
 
+let daemonPublicKey: string | null = null;
+
+const ageMs = (agent: Agent): number => {
+  const at = states.get(agent)?.lastRefreshAt;
+  return at ? Date.now() - at.getTime() : Infinity;
+};
+
 export function startDaemon(agents: Agent[], publicKeyPem: string | null): () => void {
-  const refreshAll = (): void => { for (const agent of agents) void refresh(agent, publicKeyPem); };
-  refreshAll();
-  const interval = setInterval(refreshAll, REFRESH_INTERVAL_MS);
+  daemonPublicKey = publicKeyPem;
+  for (const agent of agents) void refresh(agent, publicKeyPem);
+  const interval = setInterval(() => {
+    for (const agent of agents) if (ageMs(agent) >= REFRESH_INTERVAL_MS) void refresh(agent, publicKeyPem);
+  }, CHECK_INTERVAL_MS);
   return () => clearInterval(interval);
+}
+
+/** Re-read an agent's credentials if they are older than MAX_SERVE_AGE_MS. Called before serving them. */
+export async function ensureFresh(agent: Agent): Promise<void> {
+  if (ageMs(agent) >= MAX_SERVE_AGE_MS) await refresh(agent, daemonPublicKey);
 }
 
 export const getState = (agent: Agent): AgentState | null => {
