@@ -71,6 +71,8 @@ All commands accept --config <path>.
 `;
 
 async function main(): Promise<void> {
+  // `<subcommand> --help` shows the usage instead of failing as an unknown option
+  if (args.includes('--help') || args.includes('-h')) { console.log(HELP); return; }
   if (subcommand && subcommand in COMMAND_FLAGS) parseCommandArgs(subcommand, args);
 
   switch (subcommand) {
