@@ -278,6 +278,13 @@ available or is refused; leave the secret unset for allowlist-only setups. When 
 hit, pr-audit skips the review with a PR comment and a neutral check instead of failing the job
 (GitLab templates: `allow_failure: exit_codes: [3]`).
 
+With `REVIEW_AGENT: codex`, the GitHub templates run `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
+first: Codex reads files only through its bubblewrap sandbox, and Ubuntu 24.04 runners block the user namespaces it
+needs. That's meant for GitHub-hosted runners, which are discarded after the job; on a self-hosted runner the
+setting would persist, so allow user namespaces there deliberately or use Claude. GitLab Docker executors usually
+block them too; pr-audit then stops with a "Codex's sandbox can't start" hint
+instead of reviewing blind.
+
 This repo reviews its own PRs with the same setup (`.github/workflows/pr-review.yml`).
 
 ---
