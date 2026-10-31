@@ -34,6 +34,8 @@ mr-review:
       aud: agent-gateway
   variables:
     REVIEW_AGENT: claude   # claude | codex
+    # REVIEW_AGENT=codex: Codex reads files through its bubblewrap sandbox, which needs unprivileged user
+    # namespaces. Docker executors usually block them; pr-audit then fails with a "Codex's sandbox can't start" hint.
     AGENT_AUTH_FILE: /tmp/agent-auth-$CI_JOB_ID
     GLAB_VERSION: "1.65.0"
     # Point glab at the same GitLab instance this pipeline is running on.
@@ -47,11 +49,11 @@ mr-review:
     - install -m 755 /tmp/bin/glab /usr/local/bin/glab
 
     # Build agent-gateway
-    - git init -q _agent-gateway && git -C _agent-gateway fetch -q --depth 1 https://github.com/prince-kunwar-xcelore/agent-gateway.git 93ef8e5fe91ebd422dc25e6d2b3a931f8c61bfd9 && git -C _agent-gateway checkout -q FETCH_HEAD  # pin: agent-gateway main
+    - git init -q _agent-gateway && git -C _agent-gateway fetch -q --depth 1 https://github.com/prince-kunwar-xcelore/agent-gateway.git b52daf93f551c275119f2927f7fff4a7a830043c && git -C _agent-gateway checkout -q FETCH_HEAD  # pin: agent-gateway main
     - cd _agent-gateway && npm install -g pnpm && pnpm install && pnpm build && cd -
 
     # Install pr-audit globally (provides `pr-audit` on PATH)
-    - git init -q _pr-audit && git -C _pr-audit fetch -q --depth 1 https://github.com/prince-kunwar-xcelore/pr-audit.git 4b2e64a873d11d664ea55d5d0464dee59462f09e && git -C _pr-audit checkout -q FETCH_HEAD  # pin: pr-audit main
+    - git init -q _pr-audit && git -C _pr-audit fetch -q --depth 1 https://github.com/prince-kunwar-xcelore/pr-audit.git 3361188583fd65e829e747dedcb6c8a855c94650 && git -C _pr-audit checkout -q FETCH_HEAD  # pin: pr-audit main
     - cd _pr-audit && npm install && npm run build && npm install -g . && cd -
 
     # Install the agent CLI
