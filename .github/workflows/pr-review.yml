@@ -65,7 +65,8 @@ jobs:
       - name: Install pr-audit deps
         run: cd _pr-audit && bun install
 
-      # Codex reads files through its bubblewrap sandbox, which Ubuntu 24.04 runners block by default
+      # Codex reads files through its bubblewrap sandbox, which Ubuntu 24.04 runners block by default.
+      # For GitHub-hosted (ephemeral) runners only: on a self-hosted runner this would persist.
       - name: Allow the Codex sandbox
         if: env.REVIEW_AGENT == 'codex'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
